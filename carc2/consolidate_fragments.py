@@ -3,15 +3,11 @@ import pandas as pd
 from pathlib import Path
 import os
 import sys
-# from future.builtins import isinstance
-
 import time
 
 from utils.arg_parser import get_parser, parse_flags, construct_convergence_name
 from utils.config_parser import load_config
-from utils.data_access import collect_raw_data, get_weighted_flag, set_df_weighted, write_query_string
 
-from utils.data_processing import is_float
 
 if __name__ == '__main__':
 
@@ -27,12 +23,6 @@ if __name__ == '__main__':
         sys.exit(0)
 
     override = args.override if args.override is not None else False
-    #     override = args.override
-    # else:
-    #     override = False
-
-    # second_suffix = ''
-    # if args.test:
     second_suffix = f'_{int(time.time() * 1000)}' if args.test is True else ''
 
     proj_dir = Path(os.getcwd()) / proj_name
