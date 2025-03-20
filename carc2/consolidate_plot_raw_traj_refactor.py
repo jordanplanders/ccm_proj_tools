@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 import time
-from utils.arg_parser import get_parser
+from utils.arg_parser import get_parser, parse_flags, construct_convergence_name
 from utils.config_parser import load_config
 from utils.data_access import collect_raw_data, get_weighted_flag, set_df_weighted, write_query_string
 from utils.data_access import pull_percentile_data, get_group_sizes, get_sample_rep_n, check_empty_concat
@@ -511,25 +511,31 @@ if __name__ == '__main__':
     second_suffix = ''
 
     flags = []
-    function_flag = 'binding'
-    res_flag = ''
-    percent_threshold = .01
-    if args.flags is not None:
-        flags = args.flags
-        if 'binding' in flags:
-            function_flag = 'binding'
+    # function_flag = 'binding'
+    # res_flag = ''
+    # percent_threshold = .01
+    # if args.flags is not None:
+    #     flags = args.flags
+    #     if 'binding' in flags:
+    #         function_flag = 'binding'
+    #
+    #     for flag in args.flags:
+    #         if 'coarse' in flag:
+    #             res_flag = '_' + flag
+    #
+    #     numeric_flags = [is_float(val) for val in args.flags if is_float(val) is not None]
+    #     if len(numeric_flags) > 0:
+    #         percent_threshold = numeric_flags[0]
+    #
+    # percent_threshold_label = str(percent_threshold * 100).lstrip('.0').replace('.', 'p')
+    # if '.' in percent_threshold_label:
+    #     percent_threshold_label = '_' + percent_threshold_label.replace('.', 'p')
 
-        for flag in args.flags:
-            if 'coarse' in flag:
-                res_flag = '_' + flag
-
-        numeric_flags = [is_float(val) for val in args.flags if is_float(val) is not None]
-        if len(numeric_flags) > 0:
-            percent_threshold = numeric_flags[0]
-
-    percent_threshold_label = str(percent_threshold * 100).lstrip('.0').replace('.', 'p')
-    if '.' in percent_threshold_label:
-        percent_threshold_label = '_' + percent_threshold_label.replace('.', 'p')
+    percent_threshold, function_flag, res_flag, second_suffix = parse_flags(args,
+                                                                            default_percent_threshold=.05,
+                                                                            default_function_flag='binding',
+                                                                            default_res_flag='',
+                                                                            default_second_suffix=second_suffix)
 
     proj_dir = Path(os.getcwd()) / proj_name
     config = load_config(proj_dir / 'proj_config.yaml')
@@ -556,36 +562,43 @@ if __name__ == '__main__':
     calc_grps_df = pd.read_csv(calc_grps_path)
     calc_grps_df = calc_grps_df[calc_grps_df['weighted'] == False].copy()
 
-    calc_convergence_dir_name = carc_config_d.dirs.calc_convergence_dir  # config['calc_criteria_rates2']['calc_metrics_dir']['name']#'calc_metrics2'
-    calc_convergence_dir = calc_location / calc_convergence_dir_name / f'{function_flag}{res_flag}{second_suffix}'
-    calc_convergence_dir_csvs = calc_convergence_dir / config.calc_convergence_dir.dirs.csvs
-    if 'approach2' in flags:
-        perc_threshold_dir = calc_convergence_dir / f'{percent_threshold_label}' / 'approach2'
-    else:
-        perc_threshold_dir = calc_convergence_dir / f'{percent_threshold_label}'
 
-    if isinstance(args.dir, str):
-        if len(args.dir) > 0:
-            perc_threshold_dir = perc_threshold_dir/args.dir
+    calc_convergence_dir_name = construct_convergence_name(args, carc_config_d, percent_threshold, second_suffix)
+
+    # calc_convergence_dir_name = f'{carc_config_d.dirs.calc_convergence_dir}/tolerance{percent_threshold_label}'
+    calc_convergence_dir = calc_location / calc_convergence_dir_name
+
+
+    # calc_convergence_dir_name = carc_config_d.dirs.calc_convergence_dir  # config['calc_criteria_rates2']['calc_metrics_dir']['name']#'calc_metrics2'
+    # calc_convergence_dir = calc_location / calc_convergence_dir_name / f'{function_flag}{res_flag}{second_suffix}'
+    calc_convergence_dir_csvs = calc_convergence_dir / config.calc_convergence_dir.dirs.csvs
+    # if 'approach2' in flags:
+    #     perc_threshold_dir = calc_convergence_dir / f'{percent_threshold_label}' / 'approach2'
+    # else:
+    #     perc_threshold_dir = calc_convergence_dir / f'{percent_threshold_label}'
+    #
+    # if isinstance(args.dir, str):
+    #     if len(args.dir) > 0:
+    #         perc_threshold_dir = perc_threshold_dir/args.dir
 
 
     if args.test:
         second_suffix = f'_{int(time.time() * 1000)}' if args.test is not None else ''
 
-    raw_fig_dir = perc_threshold_dir / (config.calc_carc_dir.dirs.ccm_surr_plots_dir_raw + second_suffix)
+    raw_fig_dir = calc_convergence_dir / (config.calc_carc_dir.dirs.ccm_surr_plots_dir_raw + second_suffix)
     raw_fig_dir.mkdir(exist_ok=True, parents=True)
     convergence_grps_df = None
 
-    delta_rho_dir = perc_threshold_dir / config.calc_convergence_dir.dirs.delta_rho
+    delta_rho_dir = calc_convergence_dir / config.calc_convergence_dir.dirs.delta_rho
     delta_rho_dir.mkdir(exist_ok=True, parents=True)
 
     delta_rho_dir_csv_parts = delta_rho_dir / config.delta_rho_dir.dirs.summary_frags
     delta_rho_dir_csv_parts.mkdir(exist_ok=True, parents=True)
     delta_rho_csv_name = f'{config.calc_convergence_dir.csvs.delta_rho_csv}.csv'
-    delta_rho_csv = perc_threshold_dir / delta_rho_csv_name
-    output_file = perc_threshold_dir / 'convergence_rs_merged.csv'
+    delta_rho_csv = calc_convergence_dir / delta_rho_csv_name
+    output_file = calc_convergence_dir / 'convergence_rs_merged.csv'
 
-    convergence_grps_df = pd.read_csv(perc_threshold_dir / 'convergence_grps.csv', index_col=0)
+    convergence_grps_df = pd.read_csv(calc_convergence_dir / 'convergence_grps.csv', index_col=0)
 
     if 'Tp_tau' in flags:
         rows = []
@@ -597,7 +610,7 @@ if __name__ == '__main__':
                 rows.append(row)
         calc_grps_df = pd.DataFrame(rows, columns=calc_grps_df.columns)
         print(calc_grps_df)
-        raw_fig_dir = perc_threshold_dir / config.calc_carc_dir.dirs.ccm_surr_plots_dir_raw / 'Tp_tau'
+        raw_fig_dir = calc_convergence_dir / config.calc_carc_dir.dirs.ccm_surr_plots_dir_raw / 'Tp_tau'
 
     # if Path('/Users/jlanders').exists():
     #
