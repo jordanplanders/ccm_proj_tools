@@ -26,6 +26,7 @@ from utils.data_processing import is_float
 import ast
 
 
+
 def streamline_cause(label, split_word='causes'):
     label_parts = label.split(' {} '.format(split_word))
     clean_parts = []

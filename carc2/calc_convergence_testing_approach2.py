@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import time
 import ast
+from future.builtins import isinstance
+
 
 from utils.arg_parser import get_parser, parse_flags, construct_convergence_name
 from utils.config_parser import load_config
