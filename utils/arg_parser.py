@@ -28,3 +28,56 @@ def get_parser():
 
 
     return parser
+
+
+def parse_flags(args, default_percent_threshold=.05, default_function_flag='binding',
+                default_res_flag='', default_second_suffix=''):
+    percent_threshold = None
+    function_flag = None
+    res_flag = None
+    second_suffix = default_second_suffix
+
+    if isinstance(args.flags, list):
+        if 'inverse_exponential' in args.flags:
+            function_flag = 'inverse_exponential'
+        elif 'binding' in args.flags:
+            function_flag = 'binding'
+
+        for flag in args.flags:
+            if 'coarse' in flag:
+                res_flag = '_' + flag
+
+        numeric_flags = [is_float(val) for val in args.flags if is_float(val) is not None]
+        if len(numeric_flags) > 0:
+            percent_threshold_candidates = [flag for flag in numeric_flags if flag <= 1]
+            if len(percent_threshold_candidates) > 0:
+                percent_threshold = percent_threshold_candidates[0]
+
+            second_suffix_candidates = [flag for flag in numeric_flags if flag > 1]
+            if len(second_suffix_candidates) > 0:
+                second_suffix = f'_{int(second_suffix_candidates[0])}'
+
+    if function_flag is None:
+        function_flag = default_function_flag
+    if percent_threshold is None:
+        percent_threshold = default_percent_threshold
+    if res_flag is None:
+        res_flag = default_res_flag
+
+    return percent_threshold, function_flag, res_flag, second_suffix
+
+
+def construct_convergence_name(args, carc_config_d, percent_threshold, second_suffix):
+    percent_threshold_label = str(percent_threshold * 100).lstrip('.0').replace('.', 'p')
+    if '.' in percent_threshold_label:
+        percent_threshold_label = '_' + percent_threshold_label.replace('.', 'p')
+
+    calc_convergence_dir_name = f'{carc_config_d.dirs.calc_convergence_dir}/tolerance{percent_threshold_label}'
+    if isinstance(args.dir, str):
+        if len(args.dir) > 0:
+            subdir = args.dir
+            calc_convergence_dir_name = f'{calc_convergence_dir_name}/{subdir}{second_suffix}'
+    else:
+        calc_convergence_dir_name = f'{calc_convergence_dir_name}{second_suffix}'
+
+    return calc_convergence_dir_name
