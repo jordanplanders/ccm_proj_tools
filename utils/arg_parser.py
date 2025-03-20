@@ -1,6 +1,7 @@
 # arg_parser.py
 
 import argparse
+from utils.data_processing import is_float
 
 
 def get_parser():
