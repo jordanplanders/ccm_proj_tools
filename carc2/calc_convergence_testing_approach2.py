@@ -21,6 +21,7 @@ from utils.data_processing import is_float
 from scipy.stats import gaussian_kde
 from scipy.optimize import curve_fit
 from scipy.stats import t
+from scipy import stats
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import statsmodels.api as sm
@@ -1845,6 +1846,7 @@ if __name__ == '__main__':
                 if len(real_dfs_references)>0:
                     # arg_tuples.append((grp_d, ind, config, calc_convergence_dir,convergence_dir_csv_parts, real_dfs_references, function_flag,
                     #                plot_flag, override, datetime_flag, percent_threshold))
+                    real_dfs_references=None
                     arg_tuples.append(
                         (grp_d, ind, config, calc_convergence_dir, convergence_dir_csv_parts, real_dfs_references,
                          function_flag,
@@ -1899,6 +1901,7 @@ if __name__ == '__main__':
 
         real_dfs_references = grp_df[(grp_df['surr_var'] == 'neither') & (grp_df['weighted'].isin([False]))].copy()
         if len(real_dfs_references) > 0:
+            real_dfs_references=None
             arg_tuples.append(
                 (grp_d, index, config, calc_convergence_dir, convergence_dir_csv_parts, real_dfs_references,
                  function_flag,
