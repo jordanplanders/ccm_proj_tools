@@ -1,32 +1,24 @@
-# import matplotlib.pyplot as plt
-# import seaborn as sns
-# import numpy as np
-# import pandas as pd
-# from scipy import stats
-# import datetime
+from pathlib import Path
+from multiprocessing import Pool
+import os, sys
+import ast
 
 import pandas as pd
 import numpy as np
-from pathlib import Path
-from multiprocessing import Pool
-import re
-import os
-import sys
-import datetime
+
 import matplotlib.pyplot as plt
 import seaborn as sns
-import warnings
-import time
-# from future.builtins import isinstance
+
+from scipy import stats
+from scipy.stats import permutation_test
 
 from utils.arg_parser import get_parser, parse_flags, construct_convergence_name
 from utils.config_parser import load_config
 from utils.data_access import collect_raw_data, get_weighted_flag, set_df_weighted, write_query_string
-from utils.data_access import pull_percentile_data, get_group_sizes, get_sample_rep_n, check_empty_concat
-from scipy import stats
-from utils.data_processing import is_float
-import ast
 
+#####
+# Functions to construct figures underpinnig summary grid results (seen in SI Fig 3, details)
+#####
 
 def streamline_cause(label, split_word='causes'):
     label_parts = label.split(' {} '.format(split_word))
@@ -43,7 +35,7 @@ def streamline_cause(label, split_word='causes'):
 
 ############ Data Grab
 # Function to fetch and prepare real data
-def get_real_data(real_dfs_references, meta_variables, max_libsize, knn, sample_size=500):
+def get_real_data(real_dfs_references, grp_path, meta_variables, max_libsize, knn, sample_size=500):
     if isinstance(real_dfs_references,list) ==True:
         if len(real_dfs_references) == 0:
             print('No real data found', file=sys.stderr, flush=True)
@@ -78,13 +70,15 @@ def get_real_data(real_dfs_references, meta_variables, max_libsize, knn, sample_
     return real_df
 
 # Function to fetch and prepare surrogate data
-def get_surrogate_data(surr_dfs_references, meta_variables, max_libsize, knn, _rel,
+def get_surrogate_data(surr_dfs_references, grp_path, meta_variables, max_libsize, knn, _rel,
                        sample_size=400):
     surr_dfs = []
     ctr = 0
-    for pset_id, pset_df in surr_dfs_references.groupby('pset_id'):
-        surr_df = collect_raw_data(pset_df, meta_vars=meta_variables)
-        surr_df = surr_df[surr_df['relation'] == _rel].copy()
+    for df_csv_name in surr_dfs_references:
+        surr_df_full = pd.read_csv(grp_path / df_csv_name)
+    # for pset_id, pset_df in surr_dfs_references.groupby('pset_id'):
+    #     surr_df = collect_raw_data(pset_df, meta_vars=meta_variables)
+        surr_df = surr_df_full[surr_df_full['relation'] == _rel].copy()
         if surr_df.empty:
             continue
 
@@ -107,6 +101,7 @@ def get_surrogate_data(surr_dfs_references, meta_variables, max_libsize, knn, _r
             ctr += 1
         # if ctr > 3:
         #     continue
+
     if len(surr_dfs) == 0:
         print('No surrogate data found', file=sys.stderr, flush=True)
         return None
@@ -192,7 +187,7 @@ def construct_delta_rho_df(real_df_full, surr_df_full, target_relation, conv_mat
     return delta_rho_df
 
 
-from scipy.stats import permutation_test
+# Statistical Testing
 def perform_permutation_test(group, n_permutations=10000):
     # Define the test statistic as the difference in means
     def statistic(x, y):
@@ -257,14 +252,10 @@ def perform_statistical_tests(delta_rho_df, var_1='rho_r', var_2='rho_s', confid
 
         # Paired t-test on rho_r and rho_s
         t_stat_paired, p_value_paired = stats.ttest_rel(
-            group[var_1], group[var_2], alternative='greater', nan_policy='omit'
-        )
+            group[var_1], group[var_2], alternative='greater', nan_policy='omit')
 
-        # Confidence interval for the mean delta_rs_rho
+        # mean delta_rs_rho
         mean_delta_rho = group[delta_var].mean()
-        # ci_low, ci_high = stats.t.interval(
-        #     confidence_level, len(group) - 1, loc=mean_delta_rho, scale=stats.sem(group['delta_rs_rho'])
-        # )
 
         # Percentage of positive delta_rs_rho values
         perc_positive = (group[delta_var] > 0).mean() * 100
@@ -288,26 +279,27 @@ def perform_statistical_tests(delta_rho_df, var_1='rho_r', var_2='rho_s', confid
     return results
 
 # Function to fetch and prepare both real and surrogate data
-def fetch_and_prepare_data(real_dfs_references, surr_dfs_references, config, conv_match_d, sample_size=500):
-    meta_variables = ['tau', 'E', 'train_len', 'train_ind_i', 'knn', 'Tp_flag',
-                      'Tp', 'lag', 'Tp_lag_total', 'sample', 'weighted', 'target_var',
-                      'col_var', 'surr_var', 'col_var_id', 'target_var_id']
-
-    max_libsize = 350
-    knn = config.knn_value  # Example attribute for knn
-    target_relation = config.get_nested_attribute('calc_criteria_rates2.target_relation')
-    range_label = '{}_{}'.format(pctile_range[0], pctile_range[1])
-    range_label = range_label.replace('p', '')
-
-    real_df_full = get_real_data(real_dfs_references, meta_variables, max_libsize, knn, sample_size)
-    surr_df_full = get_surrogate_data(surr_dfs_references, meta_variables, max_libsize, knn, target_relation, sample_size)
-
-    delta_rho_df = construct_delta_rho_df(real_df_full, surr_df_full, target_relation, conv_match_d, sample_size, pctile_range)
-    delta_rho_df['range_label'] = range_label
-    return delta_rho_df
+# def fetch_and_prepare_data(real_dfs_references, surr_dfs_references, config, conv_match_d, sample_size=500):
+#     meta_variables = ['tau', 'E', 'train_len', 'train_ind_i', 'knn', 'Tp_flag',
+#                       'Tp', 'lag', 'Tp_lag_total', 'sample', 'weighted', 'target_var',
+#                       'col_var', 'surr_var', 'col_var_id', 'target_var_id']
+#
+#     max_libsize = 350
+#     knn = config.knn_value  # Example attribute for knn
+#     target_relation = config.get_nested_attribute('calc_criteria_rates2.target_relation')
+#     range_label = '{}_{}'.format(pctile_range[0], pctile_range[1])
+#     range_label = range_label.replace('p', '')
+#
+#     real_df_full = get_real_data(real_dfs_references, meta_variables, max_libsize, knn, sample_size)
+#     surr_df_full = get_surrogate_data(surr_dfs_references, meta_variables, max_libsize, knn, target_relation, sample_size)
+#
+#     delta_rho_df = construct_delta_rho_df(real_df_full, surr_df_full, target_relation, conv_match_d, sample_size, pctile_range)
+#     delta_rho_df['range_label'] = range_label
+#     return delta_rho_df
 
 
 ############ Plotting
+### Layout and Axes
 def generate_figure_layout(has_surrogates):
     """Generates the figure layout and axes based on the presence of surrogate data."""
     if has_surrogates:
@@ -336,7 +328,22 @@ def generate_figure_layout(has_surrogates):
 
     return fig, axs
 
+def synchronize_axes(axes):
+    """Synchronizes y-axis limits across multiple axes."""
+    shared_ylims = [min(ax.get_ylim()[0] for ax in axes), max(ax.get_ylim()[1] for ax in axes)]
+    for ax in axes:
+        ax.set_ylim(shared_ylims)
 
+def adjust_left_spine(ax):
+    """Adjusts the left spine to extend from 0 to the topmost tick and removes negative ticks and labels."""
+    yticks = ax.get_yticks()
+    yticks = yticks[yticks >= 0]  # Keep only non-negative ticks
+    ax.set_yticks(yticks)
+    ax.spines['left'].set_bounds(yticks[0], yticks[-1])
+
+
+### Plotting Functions
+# CCM output: library size (LibSize) vs. correlation (rho) plots
 def plot_primary(ax, data, palette, scatter=False):
     """Plots the primary line and optional scatter plot for real vs. surrogate data."""
     metric = 'rho'
@@ -353,6 +360,7 @@ def plot_primary(ax, data, palette, scatter=False):
     adjust_left_spine(ax)
 
 
+# (Real) delta rho KDE plots: delta rho (above and below)
 def plot_density(ax, data, palette, var='delta_r_rho'):
     """Plots the KDE density plot for delta rho values."""
     sns.kdeplot(data=data, y=var, hue='relation', fill=True, common_norm=False,
@@ -371,6 +379,7 @@ def plot_density(ax, data, palette, var='delta_r_rho'):
     adjust_left_spine(ax)
 
 
+# (Real-Surrogate) KDE plots: delta rho (real - surrogate) vs. library size (LibSize)
 def plot_comparison_density(ax, data, palette):
     """Plots the comparison density between real and surrogate data."""
     sns.kdeplot(data=data, y='delta_rs_rho', hue='relation_s', fill=True, common_norm=False,
@@ -381,6 +390,7 @@ def plot_comparison_density(ax, data, palette):
     adjust_left_spine(ax)
 
 
+# Function to add a rectangle annotation for the testing interval
 def add_testing_interval_annotation(ax, interval_min, interval_max, ylim):
     """Adds a rectangle to highlight the testing interval on the plot."""
     ax.add_patch(plt.Rectangle((interval_min, ylim[0]),
@@ -402,21 +412,7 @@ def add_testing_interval_annotation(ax, interval_min, interval_max, ylim):
                                     fontsize=10, ha='left', va='center', color='black', alpha=.8)
 
 
-def synchronize_axes(axes):
-    """Synchronizes y-axis limits across multiple axes."""
-    shared_ylims = [min(ax.get_ylim()[0] for ax in axes), max(ax.get_ylim()[1] for ax in axes)]
-    for ax in axes:
-        ax.set_ylim(shared_ylims)
-
-
-def adjust_left_spine(ax):
-    """Adjusts the left spine to extend from 0 to the topmost tick and removes negative ticks and labels."""
-    yticks = ax.get_yticks()
-    yticks = yticks[yticks >= 0]  # Keep only non-negative ticks
-    ax.set_yticks(yticks)
-    ax.spines['left'].set_bounds(yticks[0], yticks[-1])
-
-
+# Helper function to save annotated figures
 def save_annotated_fig(fig, ax, annotations, positions, save_path_template):
     """Saves figures with annotated labels if required."""
     for letter, pos in zip(['a', 'b', 'c'], positions):
@@ -425,6 +421,7 @@ def save_annotated_fig(fig, ax, annotations, positions, save_path_template):
         ax.texts.pop()  # Remove text for the next iteration
 
 
+############ Main Processing Function
 def process_group_workflow(arg_tuple):
     (grp_d, ind, real_dfs_references, surr_dfs_references, conv_match_d, pctile_range,
      override, write,  config, calc_location, raw_fig_dir, delta_rho_dir_csv_parts, function_flag) = arg_tuple
@@ -433,6 +430,7 @@ def process_group_workflow(arg_tuple):
                       'Tp', 'lag', 'Tp_lag_total', 'sample', 'weighted', 'target_var',
                       'col_var', 'surr_var', 'col_var_id', 'target_var_id']
 
+    grp_path = calc_location / 'calc_refactor'/f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}'/ f'E{grp_d["E"]}_tau{grp_d["tau"]}'
 
 
     if 'convergence_interval' in conv_match_d:
@@ -454,7 +452,7 @@ def process_group_workflow(arg_tuple):
 
     ik = 0
     while ik < 10:
-        real_df_full = get_real_data(real_dfs_references, meta_variables, max_libsize, knn)
+        real_df_full = get_real_data(real_dfs_references, grp_path, meta_variables, max_libsize, knn)
         if real_df_full is None:
             print('No real data found', grp_d, file=sys.stderr, flush=True)
             if ik == 9:
@@ -464,10 +462,9 @@ def process_group_workflow(arg_tuple):
         else:
             ik = 10
 
-
     ik = 0
     while ik<10:
-        surr_df_full = get_surrogate_data(surr_dfs_references, meta_variables, max_libsize, knn, target_relation)
+        surr_df_full = get_surrogate_data(surr_dfs_references, grp_path, meta_variables, max_libsize, knn, target_relation)
         if surr_df_full is None:
             print('No surrogate data found', grp_d, file=sys.stderr, flush=True)
             if ik == 9:
@@ -476,10 +473,6 @@ def process_group_workflow(arg_tuple):
                 ik +=1
         else:
             ik = 10
-        # return None
-    # else:
-    #     print('surr_df_full', len(surr_df_full), type(surr_df_full[0]))
-    #     surr_df_full = pd.concat(surr_df_full).reset_index(drop=True)
 
     ik = 0
     while ik < 10:
@@ -536,12 +529,6 @@ def process_group_workflow(arg_tuple):
             print(f'Figure saved to {fig_target_path}', file=sys.stdout, flush=True)
     else:
         print('No delta rho data found, exiting failed', grp_d, file=sys.stderr, flush=True)
-    # return test_results
-
-
-# Example of how the refactored plotting function would be used:
-# fig = process_group_plotting(real_df_full_scatter, surr_df_full_scatter, config, grp_d, conv_match_d, pal, annotate=True)
-# plt.savefig('path/to/figure.png')
 
 
 
@@ -567,6 +554,7 @@ if __name__ == '__main__':
     second_suffix = ''
 
     flags = []
+    print('args.flags', args.flags, file=sys.stdout, flush=True)
     percent_threshold, function_flag, res_flag, second_suffix = parse_flags(args,
                                                                             default_percent_threshold=.05,
                                                                             default_function_flag='binding',
@@ -592,7 +580,7 @@ if __name__ == '__main__':
     # percent_threshold_label = str(percent_threshold * 100).lstrip('.0').replace('.', 'p')
     # if '.' in percent_threshold_label:
     #     percent_threshold_label = '_' + percent_threshold_label.replace('.', 'p')
-
+    print('second_suffix', second_suffix, file=sys.stdout, flush=True)
     proj_dir = Path(os.getcwd()) / proj_name
     config = load_config(proj_dir / 'proj_config.yaml')
 
@@ -608,50 +596,34 @@ if __name__ == '__main__':
     else:
         calc_location = proj_dir / config.carc.calc_carc
 
+    # Configuration Groups
     if args.group_file is not None:
         grp_csv = f'{args.group_file}.csv'
     else:
         grp_csv = f'{carc_config_d.csvs.calc_grp_run_csv}.csv'
 
     calc_grps_path = calc_carc_mirrored / grp_csv
-
-    # calc_grps_path = calc_carc_mirrored / f'{carc_config_d.csvs.calc_grp_run_csv}.csv' # watch out for the group_ids
     calc_grps_df = pd.read_csv(calc_grps_path)
     calc_grps_df = calc_grps_df[calc_grps_df['weighted'] == False].copy()
 
-    calc_convergence_dir_name = construct_convergence_name(args, carc_config_d, percent_threshold, second_suffix)
+    # Convergence information location
+    calc_convergence_dir_name = construct_convergence_name(args, carc_config_d, percent_threshold, '')
     calc_convergence_dir = calc_location / calc_convergence_dir_name
-
-    # calc_convergence_dir_name = carc_config_d.dirs.calc_convergence_dir  # config['calc_criteria_rates2']['calc_metrics_dir']['name']#'calc_metrics2'
-    # calc_convergence_dir = calc_location / calc_convergence_dir_name / f'{function_flag}{res_flag}{second_suffix}'
     calc_convergence_dir_csvs = calc_convergence_dir / config.calc_convergence_dir.dirs.csvs
-    # if 'approach2' in flags:
-    #     perc_threshold_dir = calc_convergence_dir / f'{percent_threshold_label}' / 'approach2'
-    # else:
-    #     perc_threshold_dir = calc_convergence_dir / f'{percent_threshold_label}'
-    #
-    # if isinstance(args.dir, str):
-    #     if len(args.dir) > 0:
-    #         perc_threshold_dir = perc_threshold_dir/args.dir
 
-    if args.test:
-        second_suffix = f'_{int(time.time() * 1000)}' if args.test is not None else ''
-
+    # Create directories for saving figures & summary statistics
     raw_fig_dir = calc_convergence_dir / (config.calc_carc_dir.dirs.ccm_surr_plots_dir_raw + second_suffix)
     raw_fig_dir.mkdir(exist_ok=True, parents=True)
-    convergence_grps_df = None
 
-    delta_rho_dir = calc_convergence_dir / config.calc_convergence_dir.dirs.delta_rho
+    delta_rho_dir = calc_convergence_dir / (config.calc_convergence_dir.dirs.delta_rho + second_suffix)
     delta_rho_dir.mkdir(exist_ok=True, parents=True)
 
     delta_rho_dir_csv_parts = delta_rho_dir / config.delta_rho_dir.dirs.summary_frags
     delta_rho_dir_csv_parts.mkdir(exist_ok=True, parents=True)
-    delta_rho_csv_name = f'{config.calc_convergence_dir.csvs.delta_rho_csv}.csv'
-    delta_rho_csv = calc_convergence_dir / delta_rho_csv_name
 
-    # if (calc_convergence_dir / 'convergence_grps.csv').exists():
+    # Load convergence groups
+    convergence_grps_df = None
     convergence_grps_df = pd.read_csv(calc_convergence_dir / 'convergence_grps.csv', index_col=0)
-    # print(convergence_grps_df.head(), file=sys.stdout, flush=True)
 
     if 'Tp_tau' in flags:
         rows = []
@@ -662,62 +634,14 @@ if __name__ == '__main__':
             if row['Tp'] in tp_vals:
                 rows.append(row)
         calc_grps_df = pd.DataFrame(rows, columns=calc_grps_df.columns)
-        print(calc_grps_df)
-        # calc_grps_df = calc_grps_df[calc_grps_df['Tp'] ==calc_grps_df['tau']].copy()
         raw_fig_dir = calc_convergence_dir / config.calc_carc_dir.dirs.ccm_surr_plots_dir_raw / 'Tp_tau'
 
     pctile_range = [.25, .75]
-    raw_fig_dir.mkdir(exist_ok=True, parents=True)
     query_keys = config.calc_criteria_rates2.query_keys
 
-    # figs_dir.mkdir(exist_ok=True, parents=True)
-
-    # if len(sys.argv) > 1:
-    #     delta_label = sys.argv[1]
-    # else:
-    # delta_label = 'r50p-s50p'
-
-    # calc_grps_path = calc_carc / 'calc_grps.csv'
-    # calc_grps_df = pd.read_csv(calc_grps_path)
-    # calc_grps_df = calc_grps_df[(calc_grps_df['tau'].isin([8]))].copy()
-    # # calc_grps_df = calc_grps_df[(calc_grps_df['tau']==6) &(calc_grps_df['E']==9)].copy()
-    # calc_grps = [(grp_d, delta_label) for grp_d in calc_grps_df.to_dict(orient='records')]
-    #
-    # # Determine the number of CPUs to use from the SLURM environment variable
-    # num_cpus = int(os.getenv('SLURM_CPUS_PER_TASK', 4))
-    #
-    # # Use multiprocessing to parallelize the process
-    # with Pool(num_cpus) as pool:
-    #     results = pool.map(process_group, calc_grps)
-    #
-    # print('figures built successfully!', file = sys.stdout, flush = True)
-    #
-    #
-    # calc_grps_path = calc_carc / 'calc_grps.csv'
-    # calc_grps_df = pd.read_csv(calc_grps_path)
-    # calc_grps_df = calc_grps_df[(calc_grps_df['tau'].isin([8]))].copy()
-    # calc_grps_df = calc_grps_df[(calc_grps_df['tau']==4)].copy()
-
-    ## scratch code for checking dates
-    # if metric_df_path.exists():
-    #     # file modification timestamp of a file
-    #     m_time = os.path.getmtime(metric_df_path)
-    #     # convert timestamp into DateTime object
-    #     dt_m = datetime.datetime.fromtimestamp(m_time)
-    #     if dt_m > datetime.datetime(2024, 8, 12):
-    #         print(f'grp_id:{str(grp_d["group_id"])} already exists', file=sys.stdout, flush=True)
+    # Test locally
     if Path('/Users/jlanders').exists():
-        # plt.rc('text', usetex=True)
 
-        # if os.getenv('SLURM_CPUS_PER_TASK', 'Local')== 'Local':
-        # calc_location = notebooks_dir / 'calc_local'
-        # calc_metric_dir = calc_location / 'calc_metrics2'
-        # calc_metric_dir.mkdir(exist_ok=True, parents=True)
-
-        # calc_grps_df = calc_grps_df[(calc_grps_df['tau'] == 4) &
-        #                             (calc_grps_df['col_var_id'] == 'essel') &
-        #                             (calc_grps_df['target_var_id'] == 'vieira') &
-        #                             (calc_grps_df['weighted'] == False)].copy()
         calc_grps_df = calc_grps_df[(calc_grps_df['train_ind_i'] == 0) &
                                     (calc_grps_df['lag'] == 0) &
                                     (calc_grps_df['knn'] == 20) &
@@ -736,30 +660,15 @@ if __name__ == '__main__':
                 if len(conv_match_d)>0:
                     grp_path = calc_location / 'calc_refactor' / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}' / f'E{grp_d["E"]}_tau{grp_d["tau"]}'
 
-                    print('grp_path', grp_path, file=sys.stderr, flush=True)
                     files = [file for file in os.listdir(grp_path) if (file.endswith('.csv'))]
                     real_dfs_references = [file for file in files if 'neither' in file]
                     surr_dfs_references = [file for file in files if 'neither' not in file]
-
-                    grp_df = calc_log2_df.query(write_query_string(query_keys, grp_d))
-                    weighted_flag = get_weighted_flag(grp_d)
-                    grp_df = set_df_weighted(grp_df, weighted_flag)
-
-                    # Filter for real data frames
-                    # real_dfs_references = [file for file in files if 'neither' in file]
-                    # surr_dfs_references = [file for file in files if 'neither' not in file]
-                    #
-                    #
-                    # real_dfs_references = grp_df[grp_df['surr_var'] == 'neither'].copy()
-                    # surr_dfs_references = grp_df[grp_df['surr_var'] != 'neither'].copy()
 
                     arg_tuples.append((grp_d, ind, real_dfs_references, surr_dfs_references, conv_match_d, pctile_range,
                                        override, write_flag, config, calc_location,
                                        raw_fig_dir, delta_rho_dir_csv_parts, function_flag))
             else:
                 conv_match_d = {}
-
-
             ind += 1
         num_cpus = int(os.getenv('SLURM_CPUS_PER_TASK', min([4, len(arg_tuples)])))
 
@@ -767,15 +676,13 @@ if __name__ == '__main__':
         with Pool(num_cpus) as pool:
             pool.map(process_group_workflow, arg_tuples)
 
-
+    # Run on Cluster
     else:
 
         if args.inds is not None:
             index = int(args.inds[-1])
         else:
-            print('calc_criteria_rates2; index is required', file=sys.stdout, flush=True)
             sys.exit(0)
-        # index = int(sys.argv[1])
 
         grp_ds = calc_grps_df.to_dict(orient='records')
         if index >= len(grp_ds):
@@ -784,23 +691,12 @@ if __name__ == '__main__':
         else:
             grp_d = grp_ds[index]
 
-        grp_df = calc_log2_df.query(write_query_string(query_keys, grp_d))
-        weighted_flag = get_weighted_flag(grp_d)
-        grp_df = set_df_weighted(grp_df, weighted_flag)
-
-        # # Filter for real data frames
-        # real_dfs_references = grp_df[grp_df['surr_var'] == 'neither'].copy()
-        # surr_dfs_references = grp_df[grp_df['surr_var'] != 'neither'].copy()
-
         grp_path = calc_location / 'calc_refactor' / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}' / f'E{grp_d["E"]}_tau{grp_d["tau"]}'
         files = [file for file in os.listdir(grp_path) if (file.endswith('.csv'))]
         real_dfs_references = [file for file in files if 'neither' in file]
         surr_dfs_references = [file for file in files if 'neither' not in file]
 
-        # convergence_grps_df['group_id'] = convergence_grps_df['group_id'].astype(str)
-
         conv_match = convergence_grps_df[convergence_grps_df['group_id'] == grp_d['group_id']].copy()
-        # print(conv_match)
         if len(conv_match) > 0:
             conv_match_d = conv_match.iloc[0].to_dict()
             print(conv_match_d, file=sys.stdout, flush=True)
@@ -814,146 +710,5 @@ if __name__ == '__main__':
             conv_match_d = {}
             print('no convergence match', grp_d, file=sys.stdout, flush=True)
 
-
-
-        # # Determine the number of CPUs to use from the SLURM environment variable
-        # if os.getenv('SLURM_CPUS_PER_TASK', 'Local')== 'Local':
-        #     # calc_location = notebooks_dir / 'calc_local'
-        #     # calc_metric_dir = calc_location / 'calc_metrics2'
-        #     # calc_metric_dir.mkdir(exist_ok=True, parents=True)
-        #
-        #     num_cpus = int(os.getenv('SLURM_CPUS_PER_TASK', 4))
-        #
-        #     # Use multiprocessing to parallelize the process
-        #     with Pool(num_cpus) as pool:
-        #         results = pool.map(process_group, args)
-        # else:
-        #     # calc_location = notebooks_dir / 'calc_carc'
-        #     # calc_metric_dir = calc_location / 'calc_metrics2'
-        #     # calc_metric_dir.mkdir(exist_ok=True, parents=True)
-        #
-        #     index = int(sys.argv[1])
-        #     # metric_df_path = calc_metric_dir / f'{str(args[index][0]["group_id"])}.csv'
-        #
-        #     process_group(args[index])
-
-
-
-
-
-
-
-####Archive
-#
-# def get_real_data(real_dfs_references, meta_variables, max_libsize):
-#
-#     # collect data
-#     real_df_full = collect_raw_data(real_dfs_references, meta_vars=meta_variables)
-#     real_df_full = real_df_full[real_df_full['LibSize'] >= grp_d['knn']].copy()
-#     if len(real_df_full) == 0:
-#         print('no real data found', grp_d, file=sys.stderr, flush=True)
-#         return
-#     real_df = real_df_full[real_df_full['LibSize'] <= max_libsize].copy()
-#     rel_dfs = [rel_df.groupby('LibSize').apply(lambda x: x.sample(n=500, replace=True)).reset_index(drop=True) for rel, rel_df in real_df.groupby('relation')]
-#     real_df = pd.concat(rel_dfs).reset_index(drop=True)
-#     real_df['surr_var'] = 'neither'
-#
-#     try:
-#         real_df['relation'] = real_df['relation'].apply(lambda x: streamline_cause(x))
-#     except:
-#         pass
-#
-#     return real_df
-#
-# def get_surrogate_data(surr_dfs_references, meta_variables, max_libsize):
-#     surr_dfs = []
-#     for pset_id, pset_df in surr_dfs_references.groupby('pset_id'):
-#         surr_df = collect_raw_data(pset_df, meta_vars=meta_variables)
-#
-#         surr_df = surr_df[surr_df['relation'] == _rel].copy()
-#         if len(surr_df) == 0:
-#             print(f'no surrogate data found for {grp_d["group_id"]}, len= {len(surr_df)}', file=sys.stdout,
-#                   flush=True)
-#             continue
-#         surr_df = surr_df[surr_df['surr_var'] != 'neither'].copy()
-#         surr_df = surr_df[surr_df['LibSize'] >= grp_d['knn']].copy()
-#         surr_df = surr_df[surr_df['LibSize'] <= max_libsize].copy()
-#
-#         rel_dfs = [rel_df.groupby('LibSize').apply(lambda x: x.sample(n=100, replace=True)).reset_index(drop=True) for rel, rel_df in surr_df.groupby('surr_var')]
-#         surr_df = pd.concat(rel_dfs).reset_index(drop=True)
-#         surr_df['relation_s'] = surr_df.apply(lambda row: row['relation'].replace(row['surr_var'], f'{row["surr_var"]} (surr) ').strip(), axis=1)
-#         surr_dfs.append(surr_df)
-#
-#     surr_df_full = pd.concat(surr_dfs).reset_index(drop=True)
-#     rel_dfs = [rel_df.groupby('LibSize').apply(lambda x: x.sample(n=500, replace=True)).reset_index(drop=True) for
-#                rel, rel_df in surr_df_full.groupby('relation_s')]
-#     surr_df_full = pd.concat(rel_dfs).reset_index(drop=True)
-#     return surr_df_full
-#
-# def filter_ptile(group, l=.25, u=.75):
-#     Q1 = group['rho'].quantile(l)
-#     Q3 = group['rho'].quantile(u)
-#     IQR = Q3 - Q1
-#     return group[(group['rho'] >= Q1) & (group['rho'] <= Q3)]
-#
-# def construct_delta_rho_df(real_df_full, surr_df_full, target_relation, grp_d, conv_match_d):
-#     if 'convergence_interval' in conv_match_d.keys():
-#         interval_min = conv_match_d['convergence_interval'][0]
-#         interval_max = conv_match_d['convergence_interval'][1]
-#     else:
-#         return None
-#
-#     real_df = real_df_full[(real_df_full['LibSize'] >= interval_min) & (real_df_full['LibSize'] <= interval_max)].copy()
-#     surr_df = surr_df_full[(surr_df_full['LibSize'] >= interval_min) & (surr_df_full['LibSize'] <= interval_max)].copy()
-#
-#     real_df_min = real_df_full[(real_df_full['LibSize']<40) & (real_df_full['relation'] == target_relation)].copy()
-#     real_df_min = real_df_min.groupby('LibSize').apply(filter_ptile).reset_index(drop=True)
-#     real_df_min = real_df_min.groupby('relation').apply(lambda x: x.sample(n=500, replace=True)).reset_index(drop=True)
-#
-#     delta_rho_dfs = []
-#     for libsize in real_df.groupby('LibSize').groups.keys():
-#         real_df_libsize = real_df[real_df['LibSize'] == libsize].copy()
-#         real_df_iqr = real_df_libsize.groupby('relation').apply(filter_ptile)
-#         real_df_iqr = real_df_iqr.groupby('relation').apply(lambda x: x.sample(n=500, replace=True)).reset_index(drop=True)
-#         real_df_iqr = real_df_iqr[real_df_iqr['relation'] == target_relation].copy()
-#
-#         surr_df_libsize = surr_df[surr_df['LibSize'] == libsize].copy()
-#         surr_df_iqr = surr_df_libsize.groupby('relation_s').apply(filter_ptile)
-#         surr_df_iqr = surr_df_iqr.groupby('relation_s').apply(lambda x: x.sample(n=500, replace=True)).reset_index(drop=True)
-#         surr_df_iqr = surr_df_iqr[surr_df_iqr['relation'] == target_relation].copy()
-#
-#         for rel_s, surr_df_iqr_rel in surr_df_iqr.groupby('relation_s'):
-#             delta_df_tmp = real_df_iqr.copy()
-#             delta_df_tmp['delta_rs_rho'] = delta_df_tmp['rho'] - surr_df_iqr_rel['rho']
-#             delta_df_tmp['relation_s'] = rel_s
-#             delta_df_tmp['rho_s'] = surr_df_iqr_rel['rho']
-#             delta_df_tmp['surr_var'] = surr_df_iqr_rel['surr_var']
-#             delta_df_tmp.rename(columns={'rho': 'rho_r'}, inplace=True)
-#
-#             delta_df_tmp['delta_r_rho'] = delta_df_tmp['rho_r'] - real_df_min['rho']
-#             delta_rho_dfs.append(delta_df_tmp)
-#
-#     delta_rho_df = pd.concat(delta_rho_dfs).reset_index(drop=True)
-#     return delta_rho_df
-#
-#
-#
-#
-# def fetch_and_prepare_data(real_dfs_references, surr_dfs_references, weighted_flag, config, calc_location, function_flag):
-#     meta_variables = ['tau', 'E', 'train_len', 'train_ind_i', 'knn', 'Tp_flag',
-#                       'Tp', 'lag', 'Tp_lag_total', 'sample', 'weighted', 'target_var',
-#                       'col_var', 'surr_var', 'col_var_id', 'target_var_id']
-#
-#     max_libsize = 350
-#     target_relation = None
-#     if config.has_nested_attribute('calc_criteria_rates2.target_relation'):
-#         target_relation = config.calc_convergence_reg.target_relation
-#
-#     real_df_full = get_real_data(real_dfs_references, meta_variables, max_libsize)
-#     surr_df_full = get_surrogate_data(surr_dfs_references, meta_variables, max_libsize)
-#
-#     delta_rho_df = construct_delta_rho_df(real_df_full, surr_df_full, target_relation, grp_d, conv_match_d)
-#
-#
 
 
