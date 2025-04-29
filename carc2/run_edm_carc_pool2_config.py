@@ -8,15 +8,18 @@ import numpy as np
 import pandas as pd
 import pyEDM as pe
 import yaml
+
+from local2.plot_tau_res_ts import calc_location
 from utils.arg_parser import get_parser
 from utils.config_parser import load_config
+from utils.location_helpers import *
 
 from ccm_utils import process_output as po
 
 
 
 def run_experiment(arg_tuple):
-    pset, calc_dir, time_offset, start_ind, config = arg_tuple
+    pset, calc_dir, time_offset, start_ind, config, proj_dir = arg_tuple
     # with open(calc_dir.parent/'proj_config.yaml', 'r') as file:
     #     config = yaml.safe_load(file)
 
@@ -25,15 +28,17 @@ def run_experiment(arg_tuple):
     time_var = config.raw_data.time_var
     print('running', 'start_ind', start_ind, pset, file=sys.stdout, flush=True)
     pset['run_id'] = int(time.time() * 1000) + time_offset
-    pset['pset_id'] = pset['id']
+    if 'id' in pset:
+        pset['pset_id'] = pset['id']
     # if 'col_var_id' not in pset:
     #     pset['col_var_id'] = pset[f'{config["col_var"]}_id']
     # if 'target_var_id' not in pset:
     #     pset['target_var_id'] = pset[f'{config["target_var"]}_id']
     run_config = SimpleNamespace(**pset)
 
-    dir_path = calc_dir / str(run_config.pset_id)
-    df_path = dir_path / 'df_{}.csv'.format(run_config.run_id)
+    dir_path = calc_dir #/ str(run_config.pset_id)
+    df_csv_name = f'{run_config.pset_id}_E{run_config.E}_tau{run_config.tau}__{run_config.surr_var}{run_config.surr_num}.csv'  # 'df_{}.csv'.format(run_config.run_id)
+    df_path = dir_path / df_csv_name
 
     start_time = time.time()
     libSizes = np.arange(run_config.knn + 1, config.ccm_config.max_libsize, config.ccm_config.libsize_step)
@@ -73,6 +78,7 @@ def run_experiment(arg_tuple):
 
     if surr_var_id is not None:
         surr_file = config.get_dynamic_attr("{var}.surr_file_name", surr_var_id)
+        surr_file = surr_file[0]
 
         surr_data = pd.read_csv(proj_dir / 'surrogates' / surr_file, index_col=0)
         data = data.iloc[-len(surr_data):].copy()
@@ -89,7 +95,8 @@ def run_experiment(arg_tuple):
     train_ind_f = min([run_config.train_ind_i + train_len + run_config.exclusion_radius, len(data)])
     df_sub = data.iloc[run_config.train_ind_i:train_ind_f].copy().reset_index()
     shifted = df_sub.copy()
-    shifted[run_config.target_var] = shifted[run_config.target_var].shift(run_config.lag)
+    lag = run_config.lag if np.isnan(run_config.lag)==False else 0
+    shifted[run_config.target_var] = shifted[run_config.target_var].shift(lag)
     shifted = shifted.dropna()
 
     try:
@@ -120,13 +127,31 @@ def run_experiment(arg_tuple):
     ccm_out_df['run_id'] = run_config.run_id
     ccm_out_df['pset_id'] = run_config.pset_id
 
-    ccm_out_df.to_csv(df_path)
+    # ccm_out_df.to_csv(df_path)
     print('finish', 'start index:', start_ind, run_config.pset_id, f'time elapsed: {time.time() - start_time}',
           run_config.col_var_id, run_config.target_var_id,
           'E, tau, lag= ', run_config.E, run_config.tau, run_config.lag,
           file=sys.stdout, flush=True)
 
     # return [logs]
+    return ccm_out_df, df_path
+
+
+def write_to_file(ccm_out_df, df_path):
+    remove_cols = ['Tp_lag_total', 'sample', 'weighted', 'train_ind_0', 'run_id', 'ind_f', 'Tp_flag', 'train_len',
+                   'train_ind_i']
+    ccm_out_df = ccm_out_df[[col for col in ccm_out_df.columns if col not in remove_cols]].copy()
+
+    try:
+        ccm_out_df_0 = pd.read_csv(df_path)
+        ccm_out_df_0 = ccm_out_df_0[[col for col in ccm_out_df_0.columns if col not in remove_cols]].copy()
+
+        ccm_out_df = pd.concat([ccm_out_df_0, ccm_out_df])
+    except:
+        pass
+
+    ccm_out_df.to_csv(df_path)
+    print('wrote to file: ', df_path)
 
 
 def check_exists(pset_id, calc_dir):
@@ -156,14 +181,14 @@ if __name__ == '__main__':
     # print("Script2 in verbose mode")
     if args.parameters is not None:
         parameter_flag = args.parameters
+        parameter_dir = proj_dir / 'parameters'
+        parameter_path = parameter_dir / f'{parameter_flag}.csv'
+        parameter_df = pd.read_csv(parameter_path)
     else:
         print('parameters are required', file=sys.stdout, flush=True)
         print('parameters are required', file=sys.stderr, flush=True)
         sys.exit(0)
 
-    parameter_dir = proj_dir / 'parameters'
-    parameter_path = parameter_dir / f'{parameter_flag}.csv'
-    parameter_df = pd.read_csv(parameter_path)
 
     # # alert!!!!
     flags = []
@@ -177,7 +202,6 @@ if __name__ == '__main__':
             num_inds = int(args.inds[-2])
     end_ind = start_ind + num_inds
 
-    print(parameter_df.index, file=sys.stdout, flush=True)
     if start_ind not in parameter_df.index:  #len(parameter_ds):
         print('start_ind is not in available indexes', file=sys.stdout, flush=True)
         sys.exit(0)
@@ -193,19 +217,22 @@ if __name__ == '__main__':
         override = False
 
     parameter_df = parameter_df.loc[start_ind:end_ind, :].copy()
-    # parameter_df = parameter_df[
-    #     # (parameter_df['surr_var']=='neither')&
-    #     (parameter_df['surr_num'].isin([1, 2]))].copy()
     parameter_ds = parameter_df.to_dict(orient='records')
 
     second_suffix = ''
     if args.test:
         second_suffix = f'_{int(time.time() * 1000)}'
 
-    calc_dir = proj_dir / (config.calc_dir + f'{second_suffix}')
-    calc_dir.mkdir(parents=True, exist_ok=True)
+    calc_location = set_calc_path(args, proj_dir, config, second_suffix)
+    # if Path('/Users/jlanders').exists() == True:
+    #     calc_location = proj_dir / (config.local.calc_carc + f'{second_suffix}')  # 'calc_local_tmp'
+    # else:
+    #     calc_location = proj_dir / (config.carc.calc_carc + f'{second_suffix}')
 
-    calc_dir_list = [entry.name for entry in calc_dir.iterdir() if entry.is_dir()]
+    # calc_dir = proj_dir / (config.calc_dir + f'{second_suffix}')
+    calc_location.mkdir(parents=True, exist_ok=True)
+
+    # calc_dir_list = [entry.name for entry in calc_dir.iterdir() if entry.is_dir()]
 
     logs = []
     log_element = []
@@ -219,20 +246,27 @@ if __name__ == '__main__':
             # if 'target_var_id' not in pset:
             #     pset['target_var_id'] = pset[f'{str.lower(config["target_var"])}_id']
 
+            calc_sub_location = calc_location/f'{pset["col_var_id"]}_{pset["target_var_id"]}' / f'E{pset["E"]}_tau{pset["tau"]}'
+            calc_sub_location.mkdir(parents=True, exist_ok=True)
+            calc_dir_list = os.listdir(calc_sub_location)
+
+            candidate_tuple = (pset, calc_sub_location, time_offset, start_ind + time_offset, config, proj_dir)
             if override == True:
-                arg_tuples.append((pset, calc_dir, time_offset, start_ind + time_offset, config))
+                arg_tuples.append(candidate_tuple)
             else:
                 if 'add' in flags:
-                    arg_tuples.append((pset, calc_dir, time_offset, start_ind + time_offset, config))
-                if str(pset['id']) in calc_dir_list:
+                    arg_tuples.append(candidate_tuple)
+
+                file_name = f"{pset['id']}_E{pset['E']}_tau{pset['tau']}__{pset['surr_var']}{pset['surr_num']}.csv"
+                if str(file_name) in calc_dir_list:
                     print('skipping', pset['id'], pset['col_var_id'], pset['target_var_id'], pset['E'], pset['tau'],
                           pset['lag'], file=sys.stdout, flush=True)
                 else:
                     # if check_exists(pset['id'], calc_dir) == False:
-                    arg_tuples.append((pset, calc_dir, time_offset, start_ind + time_offset, config))
+                    arg_tuples.append(candidate_tuple)
 
         for arg in arg_tuples:
-            run_experiment(arg)
+            write_to_file(*run_experiment(arg))
 
     else:
         parameter_ds = parameter_ds[0]
@@ -245,19 +279,25 @@ if __name__ == '__main__':
             pset['target_var_id'] = pset[f'{config["target_var"]}_id']
         arg_tuples = []
         # for time_offset, pset in enumerate(parameter_ds):
+        calc_sub_location = calc_location / f'{pset["col_var_id"]}_{pset["target_var_id"]}' / f'E{pset["E"]}_tau{pset["tau"]}'
+        calc_sub_location.mkdir(parents=True, exist_ok=True)
+        calc_dir_list = os.listdir(calc_sub_location)
+
+        file_name = f"{pset['id']}_E{pset['E']}_tau{pset['tau']}__{pset['surr_var']}{pset['surr_num']}.csv"
+        candidate_tuple = (pset, calc_sub_location, time_offset, start_ind + time_offset, config, proj_dir)
         if override == False:
-            if str(pset['id']) in calc_dir_list:
+            if file_name in calc_dir_list:
                 print('skipping', pset['id'], pset['col_var_id'], pset['target_var_id'], pset['E'], pset['tau'],
                       pset['lag'], file=sys.stderr, flush=True)
             else:
                 print('prepping', pset['id'], pset['col_var_id'], pset['target_var_id'], pset['E'], pset['tau'],
                       pset['lag'], file=sys.stdout, flush=True)
-                arg_tuples.append((pset, calc_dir, time_offset, start_ind, config))
+                arg_tuples.append(candidate_tuple)
         else:
-            arg_tuples.append((pset, calc_dir, time_offset, start_ind, config))
+            arg_tuples.append((pset, calc_sub_location, time_offset, start_ind, config, proj_dir))
             print('prepping', pset['id'], pset['col_var_id'], pset['target_var_id'], pset['E'], pset['tau'],
                   pset['lag'], file=sys.stdout, flush=True)
 
         for arg in arg_tuples:
             print('sending', arg[0], arg[-1], file=sys.stdout, flush=True)
-            run_experiment(arg)
+            write_to_file(*run_experiment(arg))
