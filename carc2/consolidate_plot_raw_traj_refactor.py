@@ -9,7 +9,8 @@
 from pathlib import Path
 import sys
 import time
-from utils.arg_parser import get_parser, parse_flags, construct_convergence_name
+from utils.arg_parser import get_parser, parse_flags
+from utils.location_helpers import construct_convergence_name
 from utils.config_parser import load_config
 
 
