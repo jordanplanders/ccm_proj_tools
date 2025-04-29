@@ -3,11 +3,15 @@ import os
 
 
 class ProjectConfig:
-    def __init__(self, config_data, file_path=None):
-        self.file_path = file_path  # Store the path of the YAML file
+    def __init__(self, config_data, file_path=None, is_root=True):
+        if is_root:
+            self.file_path = str(file_path) if file_path else None
+
         for key, value in config_data.items():
+            if key == "file_path":
+                continue  # don't overwrite or duplicate this manually
             if isinstance(value, dict):
-                setattr(self, key, ProjectConfig(value))
+                setattr(self, key, ProjectConfig(value, is_root=False))
             else:
                 setattr(self, key, value)
 
@@ -97,6 +101,120 @@ def load_config(yaml_file):
 #         else:
 #             return False
 #     return True
+
+
+def add_var(config, var_type, var_id, var_meta):
+    """
+    Add or update a variable entry in the config using the structure from the existing template.
+    Only modifies the necessary fields in the var_id dictionary.
+
+    Parameters:
+    - config: dict loaded from YAML
+    - var_type: 'col' or 'target'
+    - var_id: key of the variable in config (e.g., 'col_short_var1')
+    - var_meta: dict with fields to overwrite in the variable block
+    """
+    assert var_type in {"col", "target"}, f"Unknown var_type: {var_type}"
+
+    # Use existing template block as base
+    var_block = config.get(var_id, {})
+    var_block.update({
+        "data_var": var_meta.get("data_var", var_block.get("data_var")),
+        "unit": var_meta.get("unit", var_block.get("unit")),
+        "var": var_meta.get("var", var_block.get("var")),
+        "var_label": var_meta.get("var_label", var_block.get("var_label")),
+        "var_name": var_meta.get("var_name", var_block.get("var_name")),
+    })
+    for key in var_meta.keys():
+        if key not in var_block:
+            var_block[key] = var_meta[key]
+
+    config[var_id] = var_block
+
+    # Maintain var IDs
+    var_ids_key = f"{var_type}_var_ids"
+    config.setdefault(var_ids_key, [])
+    if var_id not in config[var_ids_key]:
+        config[var_ids_key].append(var_id)
+
+    # Add to group entry (e.g., 'target')
+    group_key = var_type
+    config.setdefault(group_key, {
+        "alias": var_block["var"],
+        "ids": [],
+        "long_label": var_block["var_label"],
+        "var": var_block["var"]
+    })
+    group = config[group_key]
+    group["alias"] = var_block["var"]
+    group["var"] = var_block["var"]
+    group["long_label"] = var_block["var_label"]
+    if var_id not in group["ids"]:
+        group["ids"].append(var_id)
+
+    # Add to vars and surr_vars
+    config.setdefault("vars", {})
+    config["vars"][var_type] = var_block["var"]
+    config.setdefault("surr_vars", [])
+    if var_block["var"] not in config["surr_vars"]:
+        config["surr_vars"].append(var_block["var"])
+
+def new_config_from_template(
+    template_path,
+    output_path,
+    *,
+    project_name,
+    data_csv_name,
+    delta_t,
+    time_unit,
+    target_relation,
+    vars_to_add  # list of tuples: (var_type, var_id, var_meta)
+):
+    with open(template_path, "r") as f:
+        config = yaml.safe_load(f)
+
+    config["proj_name"] = project_name
+    config["raw_data"]["data_csv"] = data_csv_name
+    config["raw_data"]["delta_t"] = delta_t
+    config["raw_data"]["time_unit"] = time_unit
+    config["target_relation"] = target_relation
+
+    for var_type, var_id, var_meta in vars_to_add:
+        add_var(config, var_type, var_id, var_meta)
+
+    config["col_var"]=config['col']['var']
+    for key in ['target_var1', 'col_var1', 'target_short_var1', 'col_short_var1']:
+        if key in config.keys():
+            config.pop(key)
+
+    config['surr_vars'] = [var for var in config['surr_vars'] if var not in ['target_var_gen', 'col_var_gen']]
+    config["target_var_ids"] = [var_id for var_id in config["target_var_ids"] if var_id != "target_short_var1"]
+    config["target"]['ids'] = [var_id for var_id in config["target"]['ids'] if var_id != "target_short_var1"]
+
+    config["col_var_ids"] = [var_id for var_id in config["col_var_ids"] if var_id != "col_short_var1"]
+    config["col"]['ids'] = [var_id for var_id in config["col"]['ids'] if var_id != "col_short_var1"]
+    config['target_var'] = config['target']['var']
+    config['col_var'] = config['col']['var']
+
+    palette = config["pal"]
+    new_palette = {}
+    for key in palette.keys():
+        value = palette[key]
+        new_key = key.replace("target_var", config["target"]["var"]).replace("col_var", config["col"]["var"])
+        new_palette[new_key] = value
+    new_palette[config["target_var_ids"][0]] = palette["target_short_var1"]
+    new_palette[config["col_var_ids"][0]] = palette["col_short_var1"]
+    new_palette.pop("target_short_var1")
+    new_palette.pop("col_short_var1")
+
+
+    config["pal"] = new_palette
+    with open(output_path, "w") as f:
+        yaml.dump(config, f, sort_keys=False)
+
+    return config
+
+
 
 # Usage example:
 if __name__ == "__main__":
