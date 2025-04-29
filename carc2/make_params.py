@@ -7,9 +7,12 @@ from pathlib import Path
 import os
 import re
 import yaml
+proj_dir = Path(os.getcwd()).resolve().parents[0]
+sys.path.append(str(proj_dir/'ccm_proj_tools'))
 from utils.arg_parser import get_parser  # Importing the argument parser from arg_parser.py
 import importlib.util
 from utils.config_parser import load_config
+from utils.location_helpers import *
 
 # PROJECT=eevw
 # PARAMS=real
@@ -87,7 +90,6 @@ def process_group(arg_tuple):
 
     # Get the names of all parameters
     param_names = list(parameters.keys())
-    print(param_names)
 
     # Assign target and column variable aliases from the provided arguments
     parameters['target_var']['values'] = [target_var_alias]
@@ -126,14 +128,12 @@ def process_group(arg_tuple):
     else:
         param_values = [parameters[param]['values'] for param in param_names]
         parameter_sets.append(param_values)  # Use itertools.product for all combinations
-    print(param_csv)
     # Determine if the CSV file already exists and set write mode
     skip_header = True
     write_mode = 'a'
     if param_csv.exists()==False:  # If the CSV file does not exist, create a new one
         write_mode = 'w'
         skip_header = False
-    print('write_mode', write_mode)
 
     # Write the parameter combinations to the CSV file
     with open(param_csv, write_mode, newline='') as csvfile:
@@ -141,17 +141,14 @@ def process_group(arg_tuple):
 
         # Write the header row if the file is new
         header = ['id'] + param_names + ['col_var_id', 'target_var_id']
-        print(header)
         if not skip_header:
             writer.writerow(header)
 
         # Write each parameter combination along with a unique ID
         for param_values in parameter_sets:
-            print(param_values)
             for values in itertools.product(*param_values):
                 unique_id = int(time.time() * 1000)
                 new_row = [unique_id] + list(values) + [col_var_id, target_var_id]# Create a unique ID based on the current time
-                print(len(new_row), len(header))
                 writer.writerow(new_row)
                 time.sleep(0.001)  # Sleep for a millisecond to ensure unique IDs
 
@@ -170,8 +167,10 @@ if __name__ == '__main__':
         print('Project name is required', file=sys.stdout, flush=True)
         sys.exit(0)
 
-    # Create the project directory path using Pathlib
-    proj_dir = Path(os.getcwd()) / proj_name
+    proj_dir = set_proj_dir(proj_name, Path(os.getcwd()))
+    # # Create the project directory path using Pathlib
+    # # proj_dir = Path(os.getcwd()).resolve().parents[0]
+    # proj_dir = Path(os.getcwd()) #/ proj_name
 
     # Load the project configuration file specified by the --config flag (if provided)
     gen_config = 'proj_config'
@@ -194,14 +193,13 @@ if __name__ == '__main__':
     # (proj_dir / 'parameters').mkdir(parents=True, exist_ok=True)  # Create the parameters directory if it does not exist
 
     # Load the Python file as a module
-    print(config.parameters)
+    # print(config.parameters)
     spec = importlib.util.spec_from_file_location("parameters", parameters_dir / f'{config.parameters.spec_d}.py')
     params_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(params_module)
 
     # Now you can access the parameters dictionary
     parameters_d = params_module.parameters_d
-
 
     # Handle the number of surrogates specified by the --inds flag
     surrogate_range = []
@@ -224,9 +222,14 @@ if __name__ == '__main__':
     # If variables are provided using --vars, process them
     if args.vars is not None:
         surrogate_instructions_ind = [ik for ik, _ in enumerate(args.vars) if _ == 'surrogate'][0]
-        if surrogate_instructions_ind is not None:
+        surrogate_vars = []
+        if surrogate_instructions_ind<len(args.vars)-1:
             surrogate_instructions = args.vars[surrogate_instructions_ind + 1:]
-            surrogate_vars = [var for var in surrogate_instructions if type(var) == str]
+            surrogate_vars += [var for var in surrogate_instructions if type(var) == str]
+        if 'all' in args.vars:
+            # print([config.get_dynamic_attr('vars', key) for key in dir(config.vars)])
+            surrogate_vars += [config.vars.col, config.vars.target]
+        surrogate_vars = [var for var in list(set(surrogate_vars)) if var != 'all']
 
     specified_vars = False
     if (args.vars is not None):
@@ -234,8 +237,16 @@ if __name__ == '__main__':
             specified_vars = True
 
     if specified_vars ==True:
-        col_var_id = args.vars[0]
-        target_var_id = args.vars[1]
+        if args.vars[0] in config.col_var_ids:
+            col_var_id = args.vars[0]
+        elif args.vars[0] in config.target_var_ids:
+            target_var_id = args.vars[0]
+        if args.vars[1] in config.col_var_ids:
+            col_var_id = args.vars[1]
+        elif args.vars[1] in config.target_var_ids:
+            target_var_id = args.vars[1]
+
+        # target_var_id = args.vars[1]
         col_var_alias = config.col.var
         target_var_alias = config.target.var
 
