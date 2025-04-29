@@ -1,12 +1,11 @@
 
 import pandas as pd
-from pathlib import Path
-import os
 import sys
 import time
 
-from utils.arg_parser import get_parser, parse_flags, construct_convergence_name
+from utils.arg_parser import get_parser, parse_flags
 from utils.config_parser import load_config
+from utils.location_helpers import *
 
 
 if __name__ == '__main__':
@@ -31,10 +30,15 @@ if __name__ == '__main__':
     calc_carc_mirrored = proj_dir / config.mirrored.calc_carc
     carc_config_d = config.calc_carc_dir
 
-    if Path('/Users/jlanders').exists() == True:
-        calc_location = proj_dir / config.local.calc_carc  #'calc_local_tmp'
-    else:
-        calc_location = proj_dir / config.carc.calc_carc
+    calc_location = set_calc_path(args, proj_dir, config)
+
+    # if args.calc_dir is not None:
+    #     calc_location = proj_dir/args.calc_dir
+    # else:
+    #     if Path('/Users/jlanders').exists() == True:
+    #         calc_location = proj_dir / config.local.calc_carc  #'calc_local_tmp'
+    #     else:
+    #         calc_location = proj_dir / config.carc.calc_carc
 
     percent_threshold, function_flag, res_flag, second_suffix = parse_flags(args,
                                                                             default_percent_threshold=.05,
@@ -99,10 +103,8 @@ if __name__ == '__main__':
     #         calc_convergence_dir = calc_location / carc_config_d.dirs.calc_convergence_dir / f'{subdir}{second_suffix}'
     #         # perc_threshold_dir = perc_threshold_dir / args.dir
 
-    print(calc_convergence_dir)
     convergence_dir_csv_parts = calc_convergence_dir / config.calc_convergence_dir.dirs.summary_frags
     convergence_csv = calc_convergence_dir / f'{config.calc_convergence_dir.csvs.convergence_metrics_csv}.csv'
-    print(convergence_csv, file=sys.stdout, flush=True)
     delta_rho_dir = calc_convergence_dir/config.calc_convergence_dir.dirs.delta_rho
     delta_rho_dir_csv_parts = delta_rho_dir/config.delta_rho_dir.dirs.summary_frags
     delta_rho_csv_name = f'{config.calc_convergence_dir.csvs.delta_rho_csv}.csv'
