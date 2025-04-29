@@ -12,7 +12,8 @@ import seaborn as sns
 from scipy import stats
 from scipy.stats import permutation_test
 
-from utils.arg_parser import get_parser, parse_flags, construct_convergence_name
+from utils.arg_parser import get_parser, parse_flags
+from utils.location_helpers import construct_convergence_name
 from utils.config_parser import load_config
 from utils.data_access import collect_raw_data, get_weighted_flag, set_df_weighted, write_query_string
 
@@ -41,12 +42,13 @@ def get_real_data(real_dfs_references, grp_path, meta_variables, max_libsize, kn
             print('No real data found', file=sys.stderr, flush=True)
             return None
         elif len(real_dfs_references) > 1:
-            files = [real_dfs_references[0]]
-            print('Multiple files found, using the first one:', files, file=sys.stderr, flush=True)
+            # files = [real_dfs_references[0]]
+            real_df_full = pd.concat([pd.read_csv(grp_path / file) for file in real_dfs_references])
+            print('Multiple files found, concatenating:', len(real_dfs_references), file=sys.stderr, flush=True)
         else:
             files = real_dfs_references
-        real_df_full = pd.read_csv(grp_path / files[0])
-        print(real_df_full.head(), file=sys.stderr, flush=True)
+            real_df_full = pd.read_csv(grp_path / files[0])
+        # print(real_df_full.head(), file=sys.stderr, flush=True)
     else:
         real_df_full = collect_raw_data(real_dfs_references, meta_vars=meta_variables)
 
@@ -69,6 +71,12 @@ def get_real_data(real_dfs_references, grp_path, meta_variables, max_libsize, kn
 
     return real_df
 
+import re
+def remove_numbers(input_string):
+    # Use regex to remove all digits from the string
+    return re.sub(r'\d+', '', input_string)
+
+
 # Function to fetch and prepare surrogate data
 def get_surrogate_data(surr_dfs_references, grp_path, meta_variables, max_libsize, knn, _rel,
                        sample_size=400):
@@ -76,11 +84,16 @@ def get_surrogate_data(surr_dfs_references, grp_path, meta_variables, max_libsiz
     ctr = 0
     for df_csv_name in surr_dfs_references:
         surr_df_full = pd.read_csv(grp_path / df_csv_name)
-    # for pset_id, pset_df in surr_dfs_references.groupby('pset_id'):
-    #     surr_df = collect_raw_data(pset_df, meta_vars=meta_variables)
-        surr_df = surr_df_full[surr_df_full['relation'] == _rel].copy()
+        surr_df = relationship_filter(surr_df_full, _rel) #surr_df_full[surr_df_full['relation'].isin([_rel, _rel.replace('influences', 'causes')])].copy()
+
         if surr_df.empty:
             continue
+
+        if 'surr_var' not in surr_df.columns:
+            surr_var = remove_numbers(df_csv_name.split('__')[1].split('.csv')[0])
+            if surr_var == 'tsi':
+                surr_var = 'TSI'
+            surr_df['surr_var'] = surr_var
 
         surr_df = surr_df[(surr_df['surr_var'] != 'neither') & (surr_df['LibSize'] >= knn) & (surr_df['LibSize'] <= max_libsize)].copy()
         rel_dfs = [
@@ -117,6 +130,15 @@ def filter_ptile(group, l=0.25, u=0.75):
 
 filter_top_ptile = lambda x: filter_ptile(x, l=0.9, u=1)
 
+def relationship_filter(df, rel):
+    return df[df['relation'].isin([rel, rel.replace('influences', 'causes')])].copy()
+
+def rel_reformat(df, rel):
+    if rel in df.columns:
+        df[rel] = df[rel].str.replace('causes', 'influences')
+    return df
+
+
 # Function to construct delta rho dataframe
 def construct_delta_rho_df(real_df_full, surr_df_full, target_relation, conv_match_d, sample_size=500, pctile_range=[.25, .75]):
     if 'convergence_interval' not in conv_match_d:
@@ -124,47 +146,44 @@ def construct_delta_rho_df(real_df_full, surr_df_full, target_relation, conv_mat
         return None
 
     (interval_min, interval_max) = conv_match_d['convergence_interval']
-    print('interval_min', interval_min, 'interval_max', interval_max, file=sys.stderr, flush=True)
     real_df = real_df_full[(real_df_full['LibSize'] >= interval_min) & (real_df_full['LibSize'] <= interval_max)].copy()
     surr_df = surr_df_full[(surr_df_full['LibSize'] >= interval_min) & (surr_df_full['LibSize'] <= interval_max)].copy()
 
-    real_df_min = real_df_full[(real_df_full['LibSize'] < 40) & (real_df_full['relation'] == target_relation)].copy()
+    real_df_min = relationship_filter(real_df_full[(real_df_full['LibSize'] < 40)].copy(), target_relation)
     real_df_min['rho'] = real_df_min['rho'].astype(float)
-    print('real_df_min len', len(real_df_min), file=sys.stderr, flush=True)
     real_df_min = real_df_min.groupby('LibSize').apply(filter_ptile).reset_index(drop=True)
     real_df_min = real_df_min.groupby('relation').apply(lambda x: x.sample(n=sample_size, replace=True)).reset_index(drop=True)
 
-    real_df_min_top = real_df_full[(real_df_full['LibSize'] < 40) & (real_df_full['relation'] == target_relation)].copy()
+    real_df_min_top = relationship_filter(real_df_full[(real_df_full['LibSize'] < 40)].copy(), target_relation)
     real_df_min_top['rho'] = real_df_min_top['rho'].astype(float)
-    print('real_df_min len', len(real_df_min_top), file=sys.stderr, flush=True)
     real_df_min_top = real_df_min_top.groupby('LibSize').apply(filter_top_ptile).reset_index(drop=True)
     real_df_min_top = real_df_min_top.groupby('relation').apply(lambda x: x.sample(n=sample_size, replace=True)).reset_index(
         drop=True)
 
-    real_df_final = real_df_full[(real_df_full['LibSize'] > 300) & (real_df_full['relation'] == target_relation)].copy()
+    real_df_final = real_df_full[(real_df_full['LibSize'] > 300)].copy()
     real_df_final['rho'] = real_df_final['rho'].astype(float)
-    print('real_df_final len', len(real_df_final), file=sys.stderr, flush=True)
     real_df_final = real_df_final.groupby('LibSize').apply(filter_ptile).reset_index(drop=True)
     real_df_final = real_df_final.groupby('relation').apply(lambda x: x.sample(n=sample_size, replace=True)).reset_index(
         drop=True)
+    real_df_final = relationship_filter(real_df_final, target_relation)#[real_df_final['relation'] == target_relation].copy()
 
     delta_rho_dfs = []
     for libsize, real_df_libsize in real_df.groupby('LibSize'):
         real_df_libsize['rho'] = real_df_libsize['rho'].astype(float)
         real_df_iqr = real_df_libsize.groupby('relation').apply(filter_ptile).reset_index(drop=True)
         real_df_iqr = real_df_iqr.groupby('relation').apply(lambda x: x.sample(n=sample_size, replace=True)).reset_index(drop=True)
-        real_df_iqr = real_df_iqr[real_df_iqr['relation'] == target_relation].copy()
+        real_df_iqr = relationship_filter(real_df_iqr, target_relation)#[real_df_iqr['relation'] == target_relation].copy()
 
         real_df_final_top = real_df_libsize.groupby('relation').apply(filter_top_ptile).reset_index(drop=True)
         real_df_final_top = real_df_final_top.groupby('relation').apply(
             lambda x: x.sample(n=sample_size, replace=True)).reset_index(drop=True)
-        real_df_final_top = real_df_final_top[real_df_final_top['relation'] == target_relation].copy()
+        real_df_final_top = relationship_filter(real_df_final_top, target_relation)#[real_df_final_top['relation'] == target_relation].copy()
 
         surr_df_libsize = surr_df[surr_df['LibSize'] == libsize].copy()
         surr_df_libsize['rho'] = surr_df_libsize['rho'].astype(float)
         surr_df_iqr = surr_df_libsize.groupby('relation_s').apply(filter_ptile).reset_index(drop=True)
         surr_df_iqr = surr_df_iqr.groupby('relation_s').apply(lambda x: x.sample(n=sample_size, replace=True)).reset_index(drop=True)
-        surr_df_iqr = surr_df_iqr[surr_df_iqr['relation'] == target_relation].copy()
+        surr_df_iqr = relationship_filter(surr_df_iqr, target_relation)#[surr_df_iqr['relation'] == target_relation].copy()
         for rel_s, surr_df_iqr_rel in surr_df_iqr.groupby('relation_s'):
             delta_df_tmp = real_df_iqr.copy()
             delta_df_tmp['delta_rs_rho'] = delta_df_tmp['rho'] - surr_df_iqr_rel['rho'].values
@@ -434,7 +453,12 @@ def process_group_workflow(arg_tuple):
 
 
     if 'convergence_interval' in conv_match_d:
-        conv_match_d['convergence_interval'] = ast.literal_eval(conv_match_d['convergence_interval'])
+        if type(conv_match_d['convergence_interval'][0]) == str:
+            try:
+                conv_match_d['convergence_interval'] = ast.literal_eval(conv_match_d['convergence_interval'])
+            except Exception as e:
+                print(f'Error parsing convergence interval: {e}', file=sys.stderr)
+            # conv_match_d['convergence_interval'] = [0, 0]
 
     max_libsize = 325
     knn = 20
@@ -483,6 +507,8 @@ def process_group_workflow(arg_tuple):
             ik += 1
         else:
             ik = 10
+    print('delta_rho_df', len(delta_rho_df), file=sys.stderr, flush=True)
+
 
     if delta_rho_df is not None and not delta_rho_df.empty:
         delta_rho_df['range_label'] = range_label
@@ -506,10 +532,12 @@ def process_group_workflow(arg_tuple):
         for var in ['delta_r_rho', 'delta_r_rho_final']:
             fig, axs = generate_figure_layout(has_surrogates=not surr_df_full.empty)
 
-            plot_primary(axs[0], pd.concat([real_df_full, surr_df_full.rename(columns={'relation':'relation2', 'relation_s':'relation'}).drop(columns=['relation2'])]), palette)
-            plot_density(axs[2], delta_rho_df, palette, var=var)
+            primary_df = pd.concat([real_df_full, surr_df_full.rename(columns={'relation':'relation2', 'relation_s':'relation'}).drop(columns=['relation2'])])
+            primary_df = rel_reformat(rel_reformat(primary_df, 'relation'), 'relation_s')
+            plot_primary(axs[0], primary_df, palette)
+            plot_density(axs[2], rel_reformat(rel_reformat(delta_rho_df, 'relation'), 'relation_s') , palette, var=var)
             if not surr_df_full.empty:
-                plot_comparison_density(axs[-1], delta_rho_df, palette)
+                plot_comparison_density(axs[-1], rel_reformat(rel_reformat(delta_rho_df, 'relation'), 'relation_s'), palette)
 
             add_testing_interval_annotation(axs[0], conv_match_d['convergence_interval'][0],
                                             conv_match_d['convergence_interval'][1],
@@ -561,25 +589,7 @@ if __name__ == '__main__':
                                                                             default_res_flag='',
                                                                             default_second_suffix=second_suffix)
 
-    # function_flag = 'binding'
-    # res_flag = ''
-    # percent_threshold = .01
-    # if args.flags is not None:
-    #     flags = args.flags
-    #     if 'binding' in flags:
-    #         function_flag = 'binding'
-    #
-    #     for flag in args.flags:
-    #         if 'coarse' in flag:
-    #             res_flag = '_' + flag
-    #
-    #     numeric_flags = [is_float(val) for val in args.flags if is_float(val) is not None]
-    #     if len(numeric_flags) > 0:
-    #         percent_threshold = numeric_flags[0]
-    #
-    # percent_threshold_label = str(percent_threshold * 100).lstrip('.0').replace('.', 'p')
-    # if '.' in percent_threshold_label:
-    #     percent_threshold_label = '_' + percent_threshold_label.replace('.', 'p')
+
     print('second_suffix', second_suffix, file=sys.stdout, flush=True)
     proj_dir = Path(os.getcwd()) / proj_name
     config = load_config(proj_dir / 'proj_config.yaml')
