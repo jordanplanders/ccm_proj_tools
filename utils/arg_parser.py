@@ -28,6 +28,7 @@ def get_parser():
                         type=str, help="Specify any additional flags")
     parser.add_argument('-d', '--dir', dest='dir', type=str, help="Specify parent directory")
     parser.add_argument( '--calc_dir', dest='calc_dir', type=str, help="Specify calc directory")
+    parser.add_argument( '--output_dir', dest='output_dir', type=str, help="Specify output directory")
 
     return parser
 
