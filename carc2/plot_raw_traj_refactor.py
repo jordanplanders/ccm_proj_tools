@@ -439,13 +439,13 @@ def save_annotated_fig(fig, ax, annotations, positions, save_path_template):
 ############ Main Processing Function
 def process_group_workflow(arg_tuple):
     (grp_d, ind, real_dfs_references, surr_dfs_references, conv_match_d, pctile_range,
-     override, write,  config, calc_location, raw_fig_dir, delta_rho_dir_csv_parts, function_flag) = arg_tuple
+     override, write,  config, calc_location, output_dir, raw_fig_dir, delta_rho_dir_csv_parts, function_flag) = arg_tuple
     print('E', grp_d['E'], 'tau', grp_d['tau'], 'ind', ind, 'group_id', grp_d['group_id'], 'function_flag', function_flag)
     meta_variables = ['tau', 'E', 'train_len', 'train_ind_i', 'knn', 'Tp_flag',
                       'Tp', 'lag', 'Tp_lag_total', 'sample', 'weighted', 'target_var',
                       'col_var', 'surr_var', 'col_var_id', 'target_var_id']
 
-    grp_path = calc_location / 'calc_refactor'/f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}'/ f'E{grp_d["E"]}_tau{grp_d["tau"]}'
+    grp_path = output_dir / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}'/ f'E{grp_d["E"]}_tau{grp_d["tau"]}'
 
 
     if 'convergence_interval' in conv_match_d:
@@ -601,7 +601,7 @@ if __name__ == '__main__':
     #     calc_location = proj_dir / config.local.calc_carc  # 'calc_local_tmp'
     # else:
     #     calc_location = proj_dir / config.carc.calc_carc
-    calc_location = set_calc_path(args, proj_dir, config, second_suffix)
+    calc_location = set_calc_path(args, proj_dir, config)
     output_dir = set_output_path(args, calc_location, config)
 
     # Configuration Groups
@@ -673,7 +673,7 @@ if __name__ == '__main__':
                     surr_dfs_references = [file for file in files if 'neither' not in file]
 
                     arg_tuples.append((grp_d, ind, real_dfs_references, surr_dfs_references, conv_match_d, pctile_range,
-                                       override, write_flag, config, calc_location,
+                                       override, write_flag, config, calc_location,output_dir,
                                        raw_fig_dir, delta_rho_dir_csv_parts, function_flag))
             else:
                 conv_match_d = {}
@@ -709,7 +709,7 @@ if __name__ == '__main__':
             conv_match_d = conv_match.iloc[0].to_dict()
             print(conv_match_d, file=sys.stdout, flush=True)
             arg_tuple = (grp_d, index, real_dfs_references, surr_dfs_references, conv_match_d, pctile_range, override,
-                         write_flag, config, calc_location,
+                         write_flag, config, calc_location,output_dir,
                          raw_fig_dir, delta_rho_dir_csv_parts, function_flag)
 
             process_group_workflow(arg_tuple)
