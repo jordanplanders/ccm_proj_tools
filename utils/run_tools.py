@@ -42,9 +42,6 @@ def decide_file_handling(args, file_exists: bool, modify_datetime=None) -> tuple
     return run_continue, overwrite
 
 
-
-
-
 def setup_logging(script_name, log_destination=None):
     """
     Configures logging to either a file or the console based on the argument.
