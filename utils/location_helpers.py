@@ -4,9 +4,12 @@ import os
 import sys
 
 def set_calc_path(args, proj_dir, config, second_suffix=''):
-    if args.calc_dir is not None:
-        calc_location = proj_dir/args.calc_dir
-    else:
+    calc_location = None
+    if args is not None:
+        if args.calc_dir is not None:
+            calc_location = proj_dir/args.calc_dir
+
+    if calc_location is None:
         if Path('/Users/jlanders').exists() == True:
             calc_location = proj_dir / (config.local.calc_carc + f'{second_suffix}')  #'calc_local_tmp'
         else:
@@ -15,12 +18,22 @@ def set_calc_path(args, proj_dir, config, second_suffix=''):
     return calc_location
 
 def set_output_path(args, calc_location, config):
-    if args.output_dir is not None:
-        output_dir = calc_location / args.output_dir
-    elif config.carc.output_dir is not None:
-        output_dir = calc_location / config.carc.output_dir
-    else:
-        output_dir = calc_location
+    output_dir = None
+    if args is not None:
+        if args.output_dir is not None:
+            output_dir = calc_location / args.output_dir
+
+    if output_dir is None:
+        try:
+            # if config.carc.output_dir is not None:
+            output_dir = calc_location / config.carc.output_dir
+        except AttributeError:
+            print('AttributeError: config.carc.output_dir not found', file=sys.stdout, flush=True)
+            # output_dir = calc_location / 'calc_refactor'
+
+        # if output_dir.exists() == False:
+        #     output_dir = calc_location
+
     return output_dir
 
 def set_proj_dir(proj_name, current_path):
