@@ -111,7 +111,8 @@ def process_group_workflow(arg_tuple):
     max_libsize = 325
     knn = 20
 
-    grp_path = output_dir / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}'/ f'E{grp_d["E"]}_tau{grp_d["tau"]}'
+    grp_path = set_grp_path(output_dir, grp_d)
+    # grp_path = output_dir / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}'/ f'E{grp_d["E"]}_tau{grp_d["tau"]}'
 
     # grp_path = calc_location / 'calc_refactor'/f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}'/ f'E{grp_d["E"]}_tau{grp_d["tau"]}'
     grp_path.mkdir(exist_ok=True, parents=True)
