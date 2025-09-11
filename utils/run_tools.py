@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+import sys
 
 def decide_file_handling(args, file_exists: bool, modify_datetime=None) -> tuple[bool, bool]:
     """
@@ -36,6 +37,7 @@ def decide_file_handling(args, file_exists: bool, modify_datetime=None) -> tuple
     if file_exists and args.write == "append":
         run_continue = True
         overwrite    = False
+        print("Appending to existing file.", file=sys.stdout, flush=True)
         return run_continue, overwrite
 
     # 3) otherwise → run & overwrite

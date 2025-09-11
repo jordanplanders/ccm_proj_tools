@@ -27,6 +27,10 @@ def remove_numbers(input_string):
     # Use regex to remove all digits from the string
     return re.sub(r'\d+', '', input_string)
 
+def extract_numbers(input_string):
+    # Use regex to extract all numbers from the string
+    return re.findall(r'\d+', input_string)[0]  # Assuming numbers are before the first '__'
+
 def relationship_filter(df, rel):
     return df[df['relation'].isin([rel, rel.replace('influences', 'causes')])].copy()
 
@@ -36,7 +40,8 @@ def rel_reformat(df, rel):
     return df
 
 # Function to fetch and prepare real data
-def get_real_output(real_dfs_references, grp_path, meta_variables, max_libsize, knn, sample_size=500):
+def get_real_output(real_dfs_references, grp_path, meta_variables, max_libsize, knn, sample_size=500,verbose=False, kwargs=None):
+    nrows = kwargs.get('nrows', None) if isinstance(kwargs, dict) is True else None
     if isinstance(real_dfs_references,list) ==True:
         if len(real_dfs_references) == 0:
             print('No real data found', file=sys.stderr, flush=True)
@@ -44,11 +49,20 @@ def get_real_output(real_dfs_references, grp_path, meta_variables, max_libsize, 
         elif len(real_dfs_references) > 1:
             # files = [real_dfs_references[0]]
             real_df_full = pd.concat([pd.read_csv(grp_path / file) for file in real_dfs_references])
-            print('Multiple files found, concatenating:', len(real_dfs_references), file=sys.stderr, flush=True)
+            if verbose is True:
+                print('Multiple files found, concatenating:', len(real_dfs_references), file=sys.stderr, flush=True)
         else:
             files = real_dfs_references
-            real_df_full = pd.read_csv(grp_path / files[0])
-        # print(real_df_full.head(), file=sys.stderr, flush=True)
+            real_df_full = pd.read_csv(grp_path / files[0], low_memory=False,
+                                       usecols=['LibSize', 'rho', 'relation','E', 'tau', 'lag'],
+                                       dtype={'LibSize': np.int32, 'relation': str,
+                            'ind_i': int, 'rho': np.float64, 'tau': int, 'E': int,'Tp':int,
+                            'pset_id': str, 'MAE': float, 'RMSE':float, 'forcing':str, 'responding':str})
+                                       # , low_memory=True, usecols=['LibSize', 'rho', 'relation','E', 'tau', 'lag'],
+                                       # dtype={'LibSize': np.int32, 'relation': str,
+                            # 'weighted': bool, 'surr_var': str, 'surr_num': int, 'rho': float, 'tau': int, 'E': int,
+                            # 'pset_id': str, 'MAE': float, 'RMSE':float, 'forcing':str, 'responding':str}, nrows=nrows)        # print(real_df_full.head(), file=sys.stderr, flush=True)
+            # print(real_df_full.shape, file=sys.stderr, flush=True)
     else:
         real_df_full = collect_raw_output(real_dfs_references, meta_vars=meta_variables)
 
@@ -63,6 +77,7 @@ def get_real_output(real_dfs_references, grp_path, meta_variables, max_libsize, 
     ]
     real_df = pd.concat(rel_dfs).reset_index(drop=True)
     real_df['surr_var'] = 'neither'
+    real_df['surr_num'] = 0
 
     try:
         real_df['relation'] = real_df['relation'].apply(lambda x: streamline_cause(x))
@@ -74,21 +89,41 @@ def get_real_output(real_dfs_references, grp_path, meta_variables, max_libsize, 
 
 # Function to fetch and prepare surrogate data
 def get_surrogate_output(surr_dfs_references, grp_path, meta_variables, max_libsize, knn, _rel,
-                         sample_size=200):
+                         sample_size=200, verbose=False, kwargs=None):
+
+    kwargs = {} if kwargs is None else kwargs
+    if 'surr_nums' in kwargs:
+        surr_nums = kwargs['surr_nums']
+    else:
+        surr_nums = None
+    # print('surr_nums', surr_nums, file=sys.stderr, flush=True)
+    # print(f'kwargs: {kwargs}', file=sys.stderr, flush=True)
+    # surr_nums = kwargs.get('surr_nums', None) if isinstance(kwargs, dict) is True else None
+    # # print(surr_nums, file=sys.stderr, flush=True)
     surr_dfs = []
     ctr = 0
     for df_csv_name in surr_dfs_references:
-        surr_df_full = pd.read_csv(grp_path / df_csv_name,low_memory=True, )#, chunksize=5000, low_memory=True)
+        try:
+            surr_df_full = pd.read_csv(grp_path / df_csv_name,low_memory=True, )#, chunksize=5000, low_memory=True)
+        except:
+            continue
         surr_df = relationship_filter(surr_df_full, _rel) #surr_df_full[surr_df_full['relation'].isin([_rel, _rel.replace('influences', 'causes')])].copy()
 
         if surr_df.empty:
-            print(f'Empty surrogate data for {df_csv_name}', file=sys.stderr, flush=True)
+            if verbose is True:
+                print(f'Empty surrogate data for {df_csv_name}', file=sys.stderr, flush=True)
             continue
 
         surr_var = remove_numbers(df_csv_name.split('__')[1].split('.csv')[0])
+        surr_num = int(extract_numbers(df_csv_name.split('__')[1].split('.csv')[0]))
+        if surr_nums is not None:
+            if surr_num not in surr_nums:
+                # print(f'Skipping surrogate {surr_var} {surr_num} not in sur_nums', file=sys.stderr, flush=True)
+                continue
         if surr_var == 'tsi':
             surr_var = 'TSI'
         surr_df['surr_var'] = surr_var
+        surr_df['surr_num'] = int(surr_num)
 
         surr_df = surr_df[(surr_df['surr_var'] != 'neither') & (surr_df['LibSize'] >= knn) & (surr_df['LibSize'] <= max_libsize)].copy()
         rel_dfs = []
@@ -111,7 +146,7 @@ def get_surrogate_output(surr_dfs_references, grp_path, meta_variables, max_libs
             ctr += 1
 
     if len(surr_dfs) == 0:
-        print('No surrogate data found', file=sys.stderr, flush=True)
+        # print('No surrogate data found', file=sys.stderr, flush=True)
         return None
     else:
         surr_df_full = pd.concat(surr_dfs).reset_index(drop=True)
@@ -228,10 +263,11 @@ def pull_raw_data(config, proj_dir, var_ids, alias=True):
             data_var_alias = data_var
         var_aliases.append(data_var_alias)
 
-        try:
-            var_data_csv = config.get_dynamic_attr("{var}.data_csv", var_id)
-        except:
-            var_data_csv = config.raw_data.data_csv
+        # try:
+        var_data_csv = config.get_dynamic_attr("{var}.data_csv", var_id)
+        print(f'Pulling raw data for {var_id} from {var_data_csv}', file=sys.stdout, flush=True)
+        # except:
+        #     var_data_csv = config.raw_data.data_csv
         var_data = pd.read_csv(proj_dir / config.raw_data.name / f'{var_data_csv}.csv')
         var_data = var_data[[time_var, data_var]].rename(columns=
                                                                          {time_var: time_var_alias,
@@ -246,7 +282,7 @@ def pull_raw_data(config, proj_dir, var_ids, alias=True):
         data = pd.merge(data, var_df, on=time_var_alias, how='outer')
 
     data = data.dropna(subset=var_aliases, how='all')
-
+    # print(f'Raw data shape: {data.shape}, {data.head}', file=sys.stdout, flush=True)
     return data
 
 

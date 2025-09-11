@@ -34,6 +34,7 @@ def get_parser():
                         type=str, help="List of strings. For make_params.py, expects col_var_id, target_var_id, or surrogates (any combination of:) col_var, target_var, neither")
     parser.add_argument('-l', '--flags',dest='flags',  nargs='+',
                         type=str, help="Specify any additional flags")
+    parser.add_argument('--cpus', dest='cpus', type=int, help="Specify number of CPUs to use")
 
     return parser
 
