@@ -376,17 +376,55 @@ def adjust_left_spine(ax):
 
 ### Plotting Functions
 # CCM output: library size (LibSize) vs. correlation (rho) plots
-def plot_primary(ax, data, palette, scatter=False):
+def plot_primary(ax, data_d, palette, scatter=False, lines=False, pi=90, pi_shading=True,
+                 n_boot=1000, libsize_max=350, surr_lw=.75, real_lw=3):
     """Plots the primary line and optional scatter plot for real vs. surrogate data."""
     metric = 'rho'
+    # if isinstance(data, tuple):
+    #     if len(data) == 2:
+    #         data = data[0]
+
+    full = data_d['full']
+    data = data_d['data']
+
+    data = data[data['LibSize'] <= libsize_max].copy()
+    data = data[data['relation'].isin(palette.keys())].copy()
+    if full is not None:
+        full = full[full['LibSize'] <= libsize_max].copy()
+        full = full[full['relation'].isin(palette.keys())].copy()
     if scatter:
-        sns.scatterplot(data=data.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
+        if full is not None:
+            sns.scatterplot(data=full.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
+                        alpha=0.2, ax=ax, palette=palette, legend=False, s=1)
+        else:
+            sns.scatterplot(data=data.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
                         alpha=0.2, ax=ax, palette=palette, legend=False)
 
-    sns.lineplot(data=data.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
-                 legend=False, n_boot=2000, errorbar=("ci", 95), ax=ax, palette=palette)
-    sns.lineplot(data=data.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
-                 legend=True, n_boot=2000, errorbar=("pi", 50), ax=ax, palette=palette)
+    if lines is True:
+        # for surr_num, surr_num_df in data.groupby(['surr_num']):
+        #     sns.lineplot(data=surr_num_df.rename(columns={metric: 'rho'}), x='LibSize', y='rho',
+        #                  hue='relation', legend=False, ax=ax, palette=palette,alpha=.2)
+        sns.lineplot(data=data[data['surr_var']=='neither'].rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
+                     legend=True, n_boot=n_boot, ax=ax, palette=palette, lw=real_lw)
+        sns.lineplot(data=data[data['surr_var']!='neither'].rename(columns={metric: 'rho'}), x='LibSize', y='rho',
+                     hue='relation', legend=True, ax=ax, palette=palette,
+                     estimator=None, alpha=.2, units='surr_num', lw=surr_lw)
+        sns.lineplot(data=data[data['surr_var']=='neither'].rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
+                     legend=False, n_boot=n_boot, ax=ax, palette=palette, lw=real_lw)
+    if pi_shading is True:
+        sns.lineplot(data=data.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
+                     legend=False, n_boot=n_boot, errorbar=("pi", pi), ax=ax, palette=palette)
+
+    # sns.lineplot(data=data.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
+    #              legend=False, ax=ax, n_boot=n_boot, errorbar=("pi", pi), palette=palette) #n_boot=3000, errorbar=("ci", 95),
+    #
+    if lines is False:
+        sns.lineplot(data=data.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
+                 legend=True,  n_boot=n_boot, ax=ax, palette=palette) #
+    # sns.lineplot(data=data.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
+    #              legend=False, n_boot=3000, errorbar=("ci", 95), ax=ax, palette=palette)
+    # sns.lineplot(data=data.rename(columns={metric: 'rho'}), x='LibSize', y='rho', hue='relation',
+    #              legend=True, n_boot=2000, errorbar=("pi", 50), ax=ax, palette=palette)
     ax.set_ylabel(r'$\rho$')
     ax.spines[['top', 'right']].set_visible(False)
     adjust_left_spine(ax)
@@ -479,7 +517,8 @@ def process_group_workflow(arg_tuple):
                       'Tp', 'lag', 'Tp_lag_total', 'sample', 'weighted', 'target_var',
                       'col_var', 'surr_var', 'col_var_id', 'target_var_id']
 
-    grp_path = output_dir / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}'/ f'E{grp_d["E"]}_tau{grp_d["tau"]}'
+    grp_path = set_grp_path(output_dir, grp_d)
+    # grp_path = output_dir / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}'/ f'E{grp_d["E"]}_tau{grp_d["tau"]}'
 
 
     if 'convergence_interval' in conv_match_d:
@@ -649,15 +688,8 @@ if __name__ == '__main__':
 
     calc_carc_mirrored = proj_dir / config.mirrored.calc_carc
     carc_config_d = config.calc_carc_dir
-    calc_metric_dir_name = carc_config_d.dirs.calc_metrics_dir  # config['calc_criteria_rates2']['calc_metrics_dir']['name']#'calc_metrics2'
+    # calc_metric_dir_name = carc_config_d.dirs.calc_metrics_dir  # config['calc_criteria_rates2']['calc_metrics_dir']['name']#'calc_metrics2'
 
-    # calc_log_path_new = calc_carc_mirrored / f'{carc_config_d.csvs.completed_runs_csv}.csv'
-    # calc_log2_df = pd.read_csv(calc_log_path_new, index_col=0, low_memory=False)
-
-    # if Path('/Users/jlanders').exists() == True:
-    #     calc_location = proj_dir / config.local.calc_carc  # 'calc_local_tmp'
-    # else:
-    #     calc_location = proj_dir / config.carc.calc_carc
     calc_location = set_calc_path(args, proj_dir, config)
     output_dir = set_output_path(args, calc_location, config)
 
@@ -672,24 +704,28 @@ if __name__ == '__main__':
     calc_grps_df = calc_grps_df[calc_grps_df['weighted'] == False].copy()
 
     # Convergence information location
-    calc_convergence_dir_name = construct_convergence_name(args, carc_config_d, percent_threshold, '')
-    calc_convergence_dir = calc_location / calc_convergence_dir_name
-    calc_convergence_dir_csvs = calc_convergence_dir / config.calc_convergence_dir.dirs.csvs
+    calc_convergence_dir_parent = calc_location / construct_convergence_name(args, carc_config_d, percent_threshold, '')
+    # calc_convergence_dir_csvs = calc_convergence_dir / config.calc_convergence_dir.dirs.csvs
 
-    # Create directories for saving figures & summary statistics
-    raw_fig_dir = calc_convergence_dir / (config.calc_carc_dir.dirs.ccm_surr_plots_dir_raw + second_suffix)
-    raw_fig_dir.mkdir(exist_ok=True, parents=True)
-    print('raw_fig_dir', raw_fig_dir, file=sys.stdout, flush=True)
-
-    delta_rho_dir = calc_convergence_dir / (config.calc_convergence_dir.dirs.delta_rho + second_suffix)
-    delta_rho_dir.mkdir(exist_ok=True, parents=True)
-
-    delta_rho_dir_csv_parts = delta_rho_dir / config.delta_rho_dir.dirs.summary_frags
-    delta_rho_dir_csv_parts.mkdir(exist_ok=True, parents=True)
+    # # Create directories for saving figures & summary statistics
+    # raw_fig_dir = calc_convergence_dir / (config.calc_carc_dir.dirs.ccm_surr_plots_dir_raw + second_suffix)
+    # raw_fig_dir.mkdir(exist_ok=True, parents=True)
+    # print('raw_fig_dir', raw_fig_dir, file=sys.stdout, flush=True)
+    #
+    # delta_rho_dir = calc_convergence_dir / (config.calc_convergence_dir.dirs.delta_rho + second_suffix)
+    # delta_rho_dir.mkdir(exist_ok=True, parents=True)
+    #
+    # delta_rho_dir_csv_parts = delta_rho_dir / config.delta_rho_dir.dirs.summary_frags
+    # delta_rho_dir_csv_parts.mkdir(exist_ok=True, parents=True)
 
     # Load convergence groups
+
     convergence_grps_df = None
-    convergence_grps_df = pd.read_csv(calc_convergence_dir / 'convergence_grps.csv', index_col=0)
+    if args.file is not None:
+        convergence_file = f'{args.file}.csv'
+    else:
+        convergence_file = 'convergence_grps.csv'
+    convergence_grps_df = pd.read_csv(calc_convergence_dir_parent / convergence_file, index_col=0)
 
     if 'Tp_tau' in flags:
         rows = []
@@ -708,23 +744,22 @@ if __name__ == '__main__':
     # Test locally
     if Path('/Users/jlanders').exists():
 
-        calc_grps_df = calc_grps_df[(calc_grps_df['train_ind_i'] == 0) &
-                                    (calc_grps_df['lag'] == 0) &
-                                    (calc_grps_df['knn'] == 20) &
-                                    (calc_grps_df['col_var_id'] == 'essel') &
-                                    (calc_grps_df['target_var_id'] == 'vieira') &
-                                    (calc_grps_df['E'] == 4) &
-                                    (calc_grps_df['tau'] < 8)].copy()
         calc_grps = calc_grps_df.to_dict(orient='records')
 
         arg_tuples = []
         ind = 0
         for grp_d in calc_grps:
+
+            calc_convergence_dir, calc_convergence_dir_csvs, convergence_dir_csv_parts, fig_dir = set_convergence_paths(calc_convergence_dir_parent, config, grp_d)
+            convergence_grps_df = pd.read_csv(calc_convergence_dir / convergence_file, index_col=0)
+
             conv_match = convergence_grps_df[convergence_grps_df['group_id'] == grp_d['group_id']].copy()
             if len(conv_match) > 0:
                 conv_match_d = conv_match.iloc[0].to_dict()
                 if len(conv_match_d)>0:
-                    grp_path = calc_location / 'calc_refactor' / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}' / f'E{grp_d["E"]}_tau{grp_d["tau"]}'
+                    grp_path = set_grp_path(output_dir, grp_d)
+                    delta_rho_dir, delta_rho_dir_csv_parts = set_delta_rho_paths(calc_convergence_dir, config, grp_d)
+                    raw_fig_dir = set_raw_fig_dir(calc_convergence_dir, config, grp_d, second_suffix)
 
                     files = [file for file in os.listdir(grp_path) if (file.endswith('.csv'))]
                     real_dfs_references = [file for file in files if 'neither' in file]
@@ -757,15 +792,22 @@ if __name__ == '__main__':
         else:
             grp_d = grp_ds[index]
 
-        grp_path = output_dir / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}' / f'E{grp_d["E"]}_tau{grp_d["tau"]}'
+        grp_path = set_grp_path(output_dir, grp_d)
+        # grp_path = output_dir / f'{grp_d["col_var_id"]}_{grp_d["target_var_id"]}' / f'E{grp_d["E"]}_tau{grp_d["tau"]}'
         files = [file for file in os.listdir(grp_path) if (file.endswith('.csv'))]
         real_dfs_references = [file for file in files if 'neither' in file]
         surr_dfs_references = [file for file in files if 'neither' not in file]
+
+        calc_convergence_dir, calc_convergence_dir_csvs, convergence_dir_csv_parts, fig_dir = set_convergence_paths(
+            calc_convergence_dir_parent, config, grp_d)
 
         conv_match = convergence_grps_df[convergence_grps_df['group_id'] == grp_d['group_id']].copy()
         if len(conv_match) > 0:
             conv_match_d = conv_match.iloc[0].to_dict()
             print(conv_match_d, file=sys.stdout, flush=True)
+
+            delta_rho_dir, delta_rho_dir_csv_parts = set_delta_rho_paths(calc_convergence_dir, config, grp_d)
+            raw_fig_dir = set_raw_fig_dir(calc_convergence_dir, config, grp_d, second_suffix)
             arg_tuple = (grp_d, index, real_dfs_references, surr_dfs_references, conv_match_d, pctile_range, args, config, calc_location,output_dir,
                          raw_fig_dir, delta_rho_dir_csv_parts, function_flag)
 
