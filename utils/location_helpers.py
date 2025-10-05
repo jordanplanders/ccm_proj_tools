@@ -40,8 +40,22 @@ def replace(template, d):
     for key, value in d.items():
         template = template.replace(f'{{{key}}}', str(value))
     return template
+import types
+import collections.abc
 
-def set_grp_path(parent_path, d, config=None):
+
+def correct_iterable(obj):
+    if obj is None:
+        return None
+    if isinstance(obj, str):
+        return [obj]
+    else:
+        if isinstance(obj, collections.abc.Iterable):
+            return obj
+        else:
+            return [obj]
+
+def set_grp_path(parent_path, d, config=None, source='csv', grp_level='grp_dir_structure', make_grp=True):
     # if "lag" not in d:
     #     d["lag"] = 0
     # if isinstance(d["lag"], str):
@@ -50,20 +64,53 @@ def set_grp_path(parent_path, d, config=None):
     #     else:
     #         d["lag"] = 0
 
+    if 'tp' in d.keys():
+        d['Tp'] = d['tp']
+    # print('tried to set grp path?')
+    # print('set_grp_path', source)#, file=sys.stdout, flush=True)
+    tmp_d = d.copy()
+    tmp_d= {k:v[0] if isinstance(v, list) and len(v)==1 else v for k,v in tmp_d.items()}
     config_path = set_model_config_path(parent_path, d, config=config)
+
+    # print('set_grp_path d', d, source, file=sys.stdout, flush=True)
+    if source == 'csv':
+        if 'lag' in d and d['lag'] is not None:
+            grp_level = 'lag_dir_structure_csv'
+        else:
+            grp_level = 'grp_dir_structure'
+        # grp_level = 'dir_structure_csv'
+    else:
+        grp_level = 'grp_dir_structure'
+
+    # print('grp_level', grp_level)#, file=sys.stdout, flush=True)
+
     if config is not None:
         try:
-            grp_path_template = config.output.grp_dir_structure
-            grp_path_template_filled = replace(grp_path_template,d)
-            grp_path_template_filled = '/'.join([path_part for path_part in grp_path_template_filled.split('/') if '{' not in path_part])# grp_path_template.replace('{col_var_id}', d["col_var_id"]).replace('{target_var_id}', d["target_var_id"]).replace('{E}', str(d["E"])).replace('{tau}', str(d["tau"])).replace('{knn}', 'knn'+str(d["knn"])).replace('{Tp}', str(d["Tp"])).replace('{lag}', str(d.get("lag",0)))
+            grp_path_template = config.get_dynamic_attr("output.{var}", grp_level) # config.output.grp_dir_structure
+            grp_path_template_filled = replace(grp_path_template,tmp_d)
+            # grp_path_template_filled = '/'.join([path_part for path_part in grp_path_template_filled.split('/') if '{' not in path_part])# grp_path_template.replace('{col_var_id}', d["col_var_id"]).replace('{target_var_id}', d["target_var_id"]).replace('{E}', str(d["E"])).replace('{tau}', str(d["tau"])).replace('{knn}', 'knn'+str(d["knn"])).replace('{Tp}', str(d["Tp"])).replace('{lag}', str(d.get("lag",0)))
             grp_path = config_path / grp_path_template_filled
-            grp_path.mkdir(exist_ok=True, parents=True)
-            return grp_path
+            # if make_grp is True:
+            #     grp_path.mkdir(exist_ok=True, parents=True)
         except:
             pass
+    else:
+        grp_path = config_path/f'{d["col_var_id"]}_{d["target_var_id"]}' / f'E{d["E"]}_tau{d["tau"]}'
 
-    grp_path = config_path/f'{d["col_var_id"]}_{d["target_var_id"]}' / f'E{d["E"]}_tau{d["tau"]}'
-    grp_path.mkdir(exist_ok=True, parents=True)
+    str_grp_path = str(grp_path)
+    # print('initial str_grp_path', str_grp_path)
+    for key in d.keys():
+        d[key] = correct_iterable(d[key])
+
+        if len(d[key]) == 1:
+            replace_val = str(d[key][0])
+            target_repl = '{' + key + '}'
+            # print('before', str_grp_path, 'replacing', target_repl, 'with', replace_val)
+            str_grp_path = str_grp_path.replace(target_repl, replace_val)
+    grp_path = Path(str_grp_path)
+
+    if make_grp is True:
+        grp_path.mkdir(exist_ok=True, parents=True)
 
     return grp_path
 
@@ -99,6 +146,10 @@ def construct_convergence_name(args, carc_config_d, percent_threshold, second_su
 
 
 def check_exists(file_name, calc_dir):
+    dir_exists = os.path.exists(str(calc_dir))
+    if dir_exists is False:
+        return False, False
+
     calc_dir_list = os.listdir(str(calc_dir))#[entry.name for entry in calc_dir.iterdir() if entry.is_dir()]
     pset_id = file_name.split('_E')[0]  # assuming pset_id is the first part of the file name
     stem = file_name.split(pset_id)[1].lstrip('_')  # assuming the pset_id is before the first '__'
