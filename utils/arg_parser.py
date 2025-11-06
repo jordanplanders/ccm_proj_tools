@@ -1,8 +1,17 @@
-# arg_parser.py
-
 import argparse
-from utils.data_processing import is_float
-# from future.builtins import isinstance
+
+'''
+Utility functions for command line argument parsing.
+Includes a common argument parser and flag parsing function.
+'''
+
+
+def is_float(string):
+    try:
+        val = float(string)
+    except:
+        val= None
+    return val
 
 
 def get_parser():
