@@ -3,19 +3,24 @@ from collections import defaultdict
 from pathlib import Path
 from itertools import product
 import time
+from functools import reduce
+
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
+import pyarrow.compute as pc
+
 import gc
 
 # from data_objects import extract_from_pattern
 from utils.arg_parser import get_parser
 from utils.config_parser import load_config
 from utils.location_helpers import *
+from utils.data_access import *
 
-from data_obj.data_objects import DataGroup, template_replace, check_existance_in_table
+from data_obj.data_objects import DataGroup
 # from tmp_utils.path_utils import set_calc_path, set_output_path, template_replacement
 
 KEY_COLS = [
@@ -25,10 +30,10 @@ KEY_COLS = [
     "y_id","y_age_model_ind","y_var",
 ]
 
-def check_csv(output_file_name):
-    if '.csv' not in output_file_name:
-        output_file_name = f'{output_file_name}.csv'
-    return output_file_name
+# def check_csv(output_file_name):
+#     if '.csv' not in output_file_name:
+#         output_file_name = f'{output_file_name}.csv'
+#     return output_file_name
 
 def _parse_surr(token: str, x_var: str, y_var: str):
     """
@@ -83,6 +88,21 @@ def _make_uid(row: pd.Series) -> str:
                       sort_keys=True).encode()
     return hashlib.blake2b(blob, digest_size=16).hexdigest()
 
+def check_existance_in_table(table, trait_d):
+    if table is None:
+        return False
+    if table.num_rows == 0:
+        return False
+    try:
+        mask_list = [pc.equal(table[key], value) for key, value in trait_d.items() if key in table.schema.names]
+        if mask_list:
+            mask = reduce(pc.and_, mask_list)
+            filtered_table = table.filter(mask)
+        else:
+            filtered_table = table
+    except:
+        print('failed to filter table with', trait_d, file=sys.stderr, flush=True)
+        return False
 
 def extract_from_pattern(filename: str, pattern_str: str):
     """
@@ -131,22 +151,6 @@ def setup_conversion_from_calc_grp(output_dir, config, calc_grp_d):
 
     return {'e_tau_dir_read': e_tau_dir_read, 'e_tau_dir_write':e_tau_dir_write, 'parts_d': parts_d, 'col_var': col_var, 'target_var': target_var, 'config': config}
 
-def setup_conversion_from_e_tau_dir(config, e_tau_dir):
-
-    # construct path pattern
-    E_tau_grp_pattern = config.output.dir_structure if config is not None else 'knn_{knn}/tp_{Tp}/{col_var_id}_{target_var_id}/E{E}_tau{tau}'
-    sub_path = str(e_tau_dir).split('calc_refactor')[-1].lstrip('/').lstrip('\\')
-    # extract parts_d from path
-    parts_d = extract_from_pattern(sub_path, E_tau_grp_pattern)
-
-    # pull from config, will need to alter once move to var yamls or var objects
-    col_var, target_var = get_col_var_and_target_var(config, parts_d)
-
-    e_tau_dir_read = Path(e_tau_dir)
-    e_tau_dir_write = output_dir/'parquet'/template_replace(E_tau_grp_pattern, parts_d, return_replaced=False)
-
-    return {'e_tau_dir_read': e_tau_dir_read, 'e_tau_dir_write':e_tau_dir_write,'parts_d':parts_d, 'col_var':col_var, 'target_var':target_var, 'config':config}
-
 
 def package_calc_grp_results_to_parquet(
     e_tau_dir_read: Path,
@@ -165,7 +169,6 @@ def package_calc_grp_results_to_parquet(
         # pattern: str | None = None,
 ):
     # currently parts_d is expected to be the content of a calc_grp, but is parsed and reformed into grp_d rather than as a pass through
-
 
     E = parts_d.get('E', None)
     tau = parts_d.get('tau', None)
@@ -357,12 +360,7 @@ def package_calc_grp_results_to_parquet(
         gc.collect()
         pa.default_memory_pool().release_unused()
 
-        # df = pd.read_parquet(write_path, columns=["E","tau", "relation", "forcing", "responding", 'lag', 'surr_var']).drop_duplicates()
-        # # print('checking surr var', df.surr_var.unique())
-        # print("\tmissing forcing/responding:",
-        #       df["forcing"].isna().sum(), df["responding"].isna().sum(), df["surr_var"].isna().sum())
         write_paths.append(write_path)
-
 
     return write_paths, existing
 
@@ -390,14 +388,20 @@ if __name__ == "__main__":
     calc_location = set_calc_path(args, proj_dir, config, second_suffix)
     output_dir = set_output_path(args, calc_location, config)
 
-    # load calc_grp csv
-    # calc_grps_csv = proj_dir/config.calc_carc_dir.name/config.calc_carc_dir.csvs.calc_grps
-    calc_grps_csv = calc_location / check_csv(config.calc_carc_dir.csvs.calc_grp_csv)
+    calc_grps_csv = calc_location / check_csv(config.csvs.calc_grp)
     calc_grps_df = pd.read_csv(calc_grps_csv)
-
+    E_tau_grp_csv = args.parameters if args.parameters is not None else config.csvs.e_tau_grps
     if args.parameters is not None:
         print('Using E_tau groups from', args.parameters, file=sys.stdout, flush=True)
-        E_tau_grps = pd.read_csv(calc_location / check_csv(args.parameters))
+    else:
+        print('Using E_tau groups from config:', config.csvs.e_tau_grps, file=sys.stdout, flush=True)
+
+    try:
+        E_tau_grps = pd.read_csv(calc_location / check_csv(E_tau_grp_csv))
+    except:
+        E_tau_grps = pd.DataFrame()
+
+    if len(E_tau_grps) > 0:
         if args.inds is not None:
             ind = int(args.inds[-1])
             try:
@@ -405,15 +409,14 @@ if __name__ == "__main__":
             except Exception as e:
                 print('E_tau_grp_d error:', e, file=sys.stderr, flush=True)
                 sys.exit(0)
-            # calc_grps_df = calc_grps_df[calc_grps_df.isin(E_tau_grp_d).all(axis=1)].reset_index(drop=True)
-            # Suppose E_tau_grp_d = {'E': 4, 'tau': 1}
+
             query_str = ' and '.join([f'{k} == {repr(v)}' for k, v in E_tau_grp_d.items()])
             calc_grps_df2 = calc_grps_df.query(query_str).reset_index(drop=True)
             print(f"Filtered calc_grps_df to {len(calc_grps_df2)} rows matching {E_tau_grp_d}", file=sys.stdout, flush=True)
+
             for ind2, calc_grp in calc_grps_df2.iterrows():
                 calc_grp_d = calc_grp.to_dict()
-                print(f"calc_grp {ind}", calc_grp_d, file=sys.stdout, flush=True)
-                # print('existing:', len(existing), 'written:', len(write_paths))
+                print(f"\tcalc_grp {ind}", calc_grp_d, file=sys.stdout, flush=True)
                 try:
                     write_paths, existing_paths = package_calc_grp_results_to_parquet(
                         **setup_conversion_from_calc_grp(output_dir, config, calc_grp_d))
@@ -422,7 +425,6 @@ if __name__ == "__main__":
                 except Exception as e:
                     print('grp error:', e)
     else:
-        print()
         if args.inds is not None:
             ind = int(args.inds[-1])
             calc_grp_d = calc_grps_df.iloc[ind].to_dict()
@@ -444,210 +446,3 @@ if __name__ == "__main__":
                 except Exception as e:
                     print('grp error:', e, file=sys.stderr, flush=True)
 
-
-
-
-# def package_e_tau_results_to_parquet(
-#     e_tau_dir: str,
-#     col_var_id: str,
-#     target_var_id: str,
-#     col_var: str,            # e.g., 'temp'
-#     target_var: str,         # e.g., 'TSI'
-#     Tp: int = 1,
-#     config: dict | None = None,
-#     knn: int | None = None,  # if set, add knn column with this value
-#     x_age_model_ind: int | None = None,  # integer pointers from YAML
-#     y_age_model_ind: int | None = None,
-#     # relation_label: str | None = None,
-#     write_path: str | None = None,
-#         overwrite: bool = True,
-#         # pattern: str | None = None,
-# ):
-#     """
-#     Reads all lags under one E*_tau* directory and writes a single results.parquet.
-#
-#     Expects filenames like:
-#       {pset}_E{E}_tau{tau}_lag{lag}__{SUFFIX}.csv
-#     where SUFFIX ∈ {'neither0','both12', f'{x_var}033', f'{y_var}147', ...}
-#     """
-#     base = os.path.basename(e_tau_dir)  # e.g., 'E4_tau5'
-#
-#     fallback_E_tau_grp_pattern = 'knn_{knn}/tp_{Tp}/{col_var_id}_{target_var_id}/E{E}_tau{tau}'
-#     E_tau_grp_pattern = config.output.dir_structure if config is not None else fallback_E_tau_grp_pattern
-#     sub_path = str(e_tau_dir).split('calc_refactor')[-1].lstrip('/').lstrip('\\')
-#     parts_d = extract_from_pattern(sub_path, E_tau_grp_pattern)
-#     # going to load in parts_d, e_tau_dir, col_var, target_var
-#
-#     E = parts_d.get('E', None)
-#     tau = parts_d.get('tau', None)
-#     Tp = parts_d.get('Tp', None)
-#     knn = parts_d.get('knn', None)
-#     col_var_id = parts_d.get('col_var_id', None)
-#     target_var_id = parts_d.get('target_var_id', None)
-#
-#     existing = []
-#     write_paths = []
-#     lag_dirs = [entry for entry in sorted(os.listdir(e_tau_dir)) if entry.startswith("lag")]
-#     if len(lag_dirs) == 0:
-#         print(f"No lag* subdirectories found under {e_tau_dir}")
-#         return write_paths, existing
-#     else:
-#         print(f"Found {len(lag_dirs)} lag* subdirectories under {e_tau_dir}")
-#
-#     for entry in lag_dirs:
-#         lag_dir = os.path.join(e_tau_dir, entry)
-#         if not os.path.isdir(lag_dir):
-#             continue
-#         mlag = re.fullmatch(r"lag(-?\d+)", entry)
-#         if not mlag:
-#             continue
-#         lag = int(mlag.group(1))
-#
-#         write_path = os.path.join(e_tau_dir, f"E{E}_tau{tau}_lag{lag}.parquet")
-#
-#         records = []
-#         count = 0
-#         for fname in sorted(os.listdir(lag_dir)):
-#             if not fname.endswith(".csv"):
-#                 continue
-#             count += 1
-#             # {pset}_E{E}_tau{tau}_lag{lag}__{suffix}.csv
-#             surr_label = fname.split('__')[-1].rsplit('.', 1)[0]
-#             non_surr_part = fname.rsplit('__', 1)[0]
-#             # pat = rf"(\d+)_E{E}_tau{tau}_lag{lag}__([A-Za-z]+[0-9]+)\.csv"
-#             pat = rf"(\d+)_E{E}_tau{tau}_lag{lag}"#__([A-Za-z0-9]+[0-9]+)\.csv"
-#             mfile = re.fullmatch(pat, non_surr_part)
-#             if not mfile:
-#                 # allow '__neither0.csv' explicitly
-#                 mfile = re.fullmatch(rf"(\d+)_E{E}_tau{tau}_lag{lag}__(neither0)\.csv", fname)
-#             if not mfile:
-#                 continue
-#             # pset_id, suffix = mfile.group(1), mfile.group(2)
-#
-#             pset_id = mfile.group(1)
-#             surr_var, surr_num = _parse_surr(surr_label, col_var, target_var)
-#             grp_d = {'E': E, 'tau': tau, 'lag': lag, 'Tp': Tp, 'knn': knn, 'surr_var': surr_var, 'surr_num': surr_num,
-#                      'col_var_id': col_var_id,
-#                      'target_var_id': target_var_id}  # ,'col_var': col_var, 'target_var': target_var,'pset_id': pset_id,'x_age_model_ind': x_age_model_ind,'y_age_model_ind': y_age_model_ind}
-#             # print(grp_d)
-#             skip = False
-#             if os.path.exists(write_path):
-#                 do = DataGroup(grp_d)
-#                 groupconfig_file, filtered_table = do._internal_query(ds.dataset(str(write_path), format="parquet"))
-#                 if filtered_table.num_rows>0:
-#                     skip = True
-#
-#             # if os.path.exists(write_path) and not overwrite:
-#             #     existing.append(write_path)
-#             #     # print(f"Skipping E{E}_tau{tau}_lag{lag} because {write_path} exists and overwrite=False")
-#             #     continue
-#             #     # raise FileExistsError(f"{write_path} exists and overwrite=False")
-#
-#             if skip is True:
-#                 print(f"s\tSkipping {fname} because already in {Path(write_path).name}")
-#                 continue
-#
-#             fpath = os.path.join(lag_dir, fname)
-#             try:
-#                 df = pd.read_csv(fpath)
-#             except Exception:
-#                 print(f"x\tSkipping unreadable {fpath}")
-#                 continue
-#
-#             # pull known metrics if present; default to NA
-#             present = set(df.columns)
-#             take = {}
-#             for c in ("rho","MAE","RMSE","LibSize","ind_i"):
-#                 take[c] = df[c] if c in present else pd.Series([pd.NA]*len(df))
-#
-#             if "relation" in present:
-#                 rel_series = df["relation"].astype("string").str.strip().str.replace("  ", " ", regex=False)
-#             elif "relation_s" in present:
-#                 rel_series = df["relation_s"].astype("string").str.strip().str.replace("  ", " ", regex=False)
-#             else:
-#                 rel_series = pd.Series(pd.NA, index=df.index, dtype="string")
-#
-#             # 2) forcing/responding: pass through if present, else try to parse from relation text
-#             if "forcing" in present and "responding" in present:
-#                 forcing_series = df["forcing"].astype("string").str.strip()
-#                 responding_series = df["responding"].astype("string").str.strip()
-#             else:
-#                 # parse "X causes Y", "X influences Y", "X -> Y", "X → Y"
-#                 # returns two columns lhs/rhs or NA if it can't parse
-#                 parsed = rel_series.str.extract(
-#                     r"^\s*(?P<lhs>.+?)\s*(?:causes|influences|->|→)\s*(?P<rhs>.+?)\s*$",
-#                     flags=re.IGNORECASE
-#                 )
-#                 forcing_series = parsed["lhs"].astype("string")
-#                 responding_series = parsed["rhs"].astype("string")
-#
-#             # ----------------------------------------------------------------------
-#
-#             fixed = {
-#                 "E": E,
-#                 "tau": tau,
-#                 "Tp": Tp,
-#                 "lag": lag,
-#                 "knn": knn if knn is not None else pd.NA,
-#                 "pset_id": str(pset_id),
-#                 "surr_var": surr_var,
-#                 "surr_num": int(surr_num),
-#                 "x_id": col_var_id,
-#                 "x_age_model_ind": x_age_model_ind if x_age_model_ind is not None else pd.NA,
-#                 "x_var": col_var,
-#                 "y_id": target_var_id,
-#                 "y_age_model_ind": y_age_model_ind if y_age_model_ind is not None else pd.NA,
-#                 "y_var": target_var,
-#             }
-#             fixed_df = pd.DataFrame({k: [v] * len(df) for k, v in fixed.items()})
-#             # print('fixed_df', fixed_df.head())
-#             out = pd.concat([fixed_df, pd.DataFrame(take)], axis=1)
-#             # print('out before extras', out.head())
-#             # attach row-wise relation/forcing/responding (may contain NA if not present/parsable)
-#             out["relation"] = rel_series
-#             out["forcing"] = forcing_series
-#             out["responding"] = responding_series
-#
-#             # optional provenance passthrough (unchanged)
-#             for c in ("code_version", "align_method", "interp_method", "started_at", "finished_at", "status"):
-#                 if c in present:
-#                     out[c] = df[c].astype(str)
-#
-#             records.append(out)
-#
-#         if not records:
-#             print(f"No CSV rows discovered under {e_tau_dir}, lag={lag}")
-#             continue
-#
-#         res = pd.concat(records, ignore_index=True)
-#
-#         # stable uid includes age_model_ind and surr_var
-#         res["uid"] = res.apply(_make_uid, axis=1)
-#
-#         # light typing
-#         for c in ("E","tau","Tp","lag","LibSize","surr_num","x_age_model_ind","y_age_model_ind"):
-#             if c in res.columns:
-#                 res[c] = pd.to_numeric(res[c], errors="coerce").astype("Int64")
-#         print(f"\tFound {len(res)} CSV rows under E{E}_tau{tau}, lag={lag} from {count} files")
-#         # write beside the E*_tau* folder by default
-#         # print('res columns', res.columns)
-#         new_table = pa.Table.from_pandas(res, preserve_index=False)
-#
-#         if os.path.exists(write_path):
-#             existing_table = pq.read_table(write_path)
-#             print('Existing rows in', write_path, ':', existing_table.num_rows)
-#             new_table = pa.concat_tables([existing_table, new_table], promote=True)
-#
-#         print('\tCombined rows:', new_table.num_rows)
-#         print('\t', write_path)
-#         pq.write_table(new_table,
-#                        write_path, compression="zstd", use_dictionary=True)
-#
-#         df = pd.read_parquet(write_path, columns=["E","tau", "relation", "forcing", "responding", 'lag', 'surr_var']).drop_duplicates()
-#         # print('checking surr var', df.surr_var.unique())
-#         print("\tmissing forcing/responding:",
-#               df["forcing"].isna().sum(), df["responding"].isna().sum())
-#         write_paths.append(write_path)
-#
-#
-#     return write_paths, existing
