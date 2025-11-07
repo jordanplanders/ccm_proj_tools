@@ -8,7 +8,7 @@ import sys
 import datetime
 import gc
 import re
-
+from utils.location_helpers import check_location
 
 
 def check_csv(output_file_name):
@@ -54,15 +54,16 @@ def choose_data_source(proj_dir, config, data_source, var_data_csv=None, data_ty
         remove_extra_index(var_data)
     """
 
-    if data_type == 'raw':
+    loc_config = config.get_dynamic_attr('{var}', check_location(proj_dir))
+    if data_type == 'real':
         try:
-            config_source = config.raw_data.name
+            config_source = loc_config.raw_data
         except:
             config_source = 'data'
         alternative_source = 'master_data'
     elif data_type in ['surr', 'surrogate']:
         try:
-            config_source = config.surrogate_data.name
+            config_source = loc_config.surrogate_data
         except:
             config_source = 'surrogates'
         alternative_source = 'master_surrogates'
@@ -128,15 +129,20 @@ def pull_raw_data(config, proj_dir, var_ids, alias=True, data_source='data'):
     data_dfs = []
     var_aliases = []
     for var_id in var_ids:
-        data_var = config.get_dynamic_attr("{var}.data_var", var_id)
+        try:
+            data_var = config.get_dynamic_attr("{var}.real_ts_var", var_id)
+        except:
+            data_var = config.get_dynamic_attr("{var}.data_var", var_id)
         if alias == True:
             data_var_alias = config.get_dynamic_attr("{var}.var", var_id)
         else:
             data_var_alias = data_var
         var_aliases.append(data_var_alias)
 
-        # try:
-        var_data_csv = config.get_dynamic_attr("{var}.data_csv", var_id)
+        try:
+            var_data_csv = config.get_dynamic_attr("{var}.raw_data_csv", var_id)
+        except:
+            var_data_csv = config.get_dynamic_attr("{var}.data_csv", var_id)
         data_path, var_data = choose_data_source(proj_dir, config, data_source, var_data_csv=var_data_csv)
         print(f'Using data from {data_path}', file=sys.stdout, flush=True)
 
