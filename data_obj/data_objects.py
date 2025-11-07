@@ -35,6 +35,33 @@ sys.path.append(CODE_DIR)
 
 from utils.data_access import *
 from utils.location_helpers import *
+from data_obj.data_var import *
+from data_obj.relationship_obj import *
+from data_obj.plotting_objects import *
+import cloudpickle
+
+# dump
+import os, tempfile, pickle, joblib, cloudpickle
+
+def _atomic_write(path, writer):
+    d = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(prefix=".tmp_", dir=d)
+    os.close(fd)
+    try:
+        writer(tmp)
+        os.replace(tmp, path)  # atomic on POSIX
+    finally:
+        try: os.remove(tmp)
+        except OSError: pass
+
+def joblib_cloud_atomic_dump(obj, path, *, compress=3, protocol=pickle.HIGHEST_PROTOCOL):
+    blob = cloudpickle.dumps(obj, protocol=protocol)
+    _atomic_write(path, lambda tmp: joblib.dump(blob, tmp, compress=compress))
+
+def joblib_cloud_load(path):
+    blob = joblib.load(path)
+    return cloudpickle.loads(blob)
+
 
 def joblib_atomic_dump(obj, path, *, compress=3, protocol=None):
     d = os.path.dirname(path) or "."
@@ -55,7 +82,6 @@ def joblib_safe_load(path, *, mmap_mode=None):
     except EOFError as e:
         raise EOFError(f"{path} appears truncated/corrupted. "
                        "Recreate it with an atomic dump and avoid concurrent writers.") from e
-
 
 def correct_iterable(obj):
     if obj is None:
@@ -127,9 +153,6 @@ def check_return(table):
         return True
     else:
         return False
-
-
-    #
 
 _as_len1_array = lambda x: _as_lenN_array(x, 1)
 
@@ -573,9 +596,9 @@ class DataGroup:
 
 
     def get_files(self, config, output_path, file_name_pattern=None, source='parquet'):
-        grp_path_template = config.get_dynamic_attr("output.{var}", 'dir_structure')  # config.output.grp_dir_structure
+        grp_path_template = config.get_dynamic_attr("output.{var}.dir_structure", source)  # config.output.grp_dir_structure
         if file_name_pattern is None:
-            file_name_pattern = config.get_dynamic_attr("output.{var}", "file_name_pattern")  # config.output.file_name_pattern
+            file_name_pattern = config.output.parquet.file_name#get_dynamic_attr("output.parquet.file_name{var}", "file_name_pattern")  # config.output.file_name_pattern
 
         grp_path_template_filled, replaced_parts = template_replace(grp_path_template, self.static_traits)
 
@@ -770,6 +793,7 @@ class Output:
 class OutputCollection:
     def __init__(self, grp_specs=None, in_table=None, outtype=None, tmp_dir=None):
 
+        self.dyad_home = None
         self.tmp_path = Path(str(tmp_dir) if tmp_dir is not None else str(Path.cwd() / 'tmp'))
         # print('temporary directory for OutputCollection:', self.tmp_path)
         self.tmp_path.mkdir(parents=True, exist_ok=True)
@@ -1080,212 +1104,250 @@ class OutputCollection:
             paths['delta_rho_full'] = self.delta_rho_full.path
         return paths
 
+    def migrate_path(self, new_dyad_home=None, tmp_home=None):
+        if new_dyad_home is None:
+            new_dyad_home = self.dyad_home
+        if new_dyad_home is None:
+            new_dyad_home = self.tmp_path.parent.parent
+
+        self.dyad_home = new_dyad_home
+
+        if tmp_home is None:
+            tmp_home = self.tmp_path.parent.name
+
+        self.tmp_path = self.dyad_home / tmp_home / 'tmp'
+
+        if hasattr(self, "table") and self.table is not None and self.table.path is not None:
+            self.table.path = self.tmp_path / self.table.path.name
+            self.table.tmp_dir = self.tmp_path
+        if hasattr(self, "libsize_aggregated") and self.libsize_aggregated is not None and self.libsize_aggregated.path is not None:
+            self.libsize_aggregated.path = self.tmp_path / self.libsize_aggregated.path.name
+            self.libsize_aggregated.tmp_dir = self.tmp_path
+        if hasattr(self, "active_stats") and self.active_stats is not None and self.active_stats.path is not None:
+            self.active_stats.path = self.tmp_path / self.active_stats.path.name
+            self.active_stats.tmp_dir = self.tmp_path
+        if hasattr(self, "active_full") and self.active_full is not None and self.active_full.path is not None:
+            self.active_full.path = self.tmp_path / self.active_full.path.name
+            self.active_full.tmp_dir = self.tmp_path
+        if hasattr(self, "delta_rho_stats") and self.delta_rho_stats is not None and self.delta_rho_stats.path is not None:
+            self.delta_rho_stats.path = self.tmp_path / self.delta_rho_stats.path.name
+            self.delta_rho_stats.tmp_dir = self.tmp_path
+        if hasattr(self, "delta_rho_full") and self.delta_rho_full is not None and self.delta_rho_full.path is not None:
+            self.delta_rho_full.path = self.tmp_path / self.delta_rho_full.path.name
+            self.delta_rho_full.tmp_dir = self.tmp_path
 
 
-class DataVarConfig:
-    def __init__(self, config, var_id, proj_dir, suffix_label=None, suffix_ind=None):
 
-        self.var_id = var_id
-        self.suffix_label= suffix_label if suffix_label is not None else ''
-        self.suffix_ind = suffix_ind if suffix_ind is not None else ''
-        self.suffix = f'{self.suffix_label}{self.suffix_ind}'
-
-        self.raw_data_csv = None
-        self.raw_data_var = None
-        self.raw_data_col = None
-        self.raw_time_var = None
-        self.var = None  # e.g. 'temp'
-
-        self.surr_csvs = None
-        self.surr_csv_stem = None
-        self.surr_csv = None
-        self.surr_time_var = None
-        self.surr_prefix = None
-        self.surr_var = None  # e.g. 'temp'
-        # self.surr_num = None
-
-        self.obs_type = None
-        self.source = None
-        self.unit = None
-        self.var_label = None
-        self.var_name = None
-        self.year = None
-        self.color = None
-
-        # TODO there is some future redundancy here and sketchy path handling
-        self.raw_data_dir_path = None
-        self.surr_data_dir_path = None
-        self.proj_dir = None
-        self.populate(config, proj_dir)
-
-
-    def populate(self, config, proj_dir):
-
-        self.proj_dir = proj_dir
-        try:
-            var_yaml = config.get_dynamic_attr("data_vars.{var}.config", self.var_id)
-            # load variable-specific settings from config
-            self.load_from_var_yaml(var_yaml, proj_dir)
-            var_info = var_yaml.get(self.var_id, None) if var_yaml is not None else None
-        except:
-            print(f'reading var yaml for {self.var_id} failed, trying config')
-            self.load_from_config( config, proj_dir)
-
-    def load_from_var_yaml(self, var_yaml, proj_dir):
-        print('load_from_var_yaml function is a stub - needs to be implemented')
-        pass
-
-    def load_from_config(self, config, proj_dir):
-
-        var_id = self.var_id
-        var_info = config.get_dynamic_attr("{var}", self.var_id)
-        var_info = var_info.to_dict()
-
-        if 'raw_data_var' not in var_info.keys():
-            if 'data_var' in var_info.keys():
-                data_var = var_info.pop('data_var', None)
-                var_info['raw_data_var'] = data_var
-
-        if 'raw_data_csv' not in var_info.keys():
-            if 'data_csv' in var_info.keys():
-                data_csv = var_info.pop('data_csv', None)
-                var_info['raw_data_csv'] = data_csv
-
-        if 'raw_time_var' not in var_info.keys():
-            time_var = var_info.pop('raw_time_var', None)
-            if 'time_var' in var_info.keys():
-                time_var = var_info.pop('time_var', None)
-            else:
-                time_var = 'time'
-            var_info['raw_time_var'] = time_var
-
-        if 'surr_time_var' not in var_info.keys():
-            var_info['surr_time_var']='date'
-
-
-        if 'surr_var' not in var_info.keys() or var_info['surr_var'] is None:
-            var_info['surr_var'] = var_info.get('var', None)
-
-        try:
-            surr_csvs = config.get_dynamic_attr("{var}.surr_file_name", self.var_id)
-        except:
-            surr_csvs = None
-
-        if surr_csvs is not None:
-            surr_csvs = correct_iterable(surr_csvs)
-            if len(surr_csvs) == 1:
-                var_info['surr_csv_stem'] = surr_csvs[0].replace('.csv', '').replace('.txt', '')
-            else:
-                print(f'Multiple surrogate csvs found for {self.var_id}: {surr_csvs}')
-
-        var_info['surr_prefix'] = var_info.get('surr_prefix', var_info.get('surr_var', None))
-        for key in var_info.keys():
-            if hasattr(self, key):
-                setattr(self, key, var_info[key])
-
-        self.raw_data_dir_path = self.set_data_source(config, data_source='data', data_type='raw')
-        self.get_color(config)
-        self.set_surr_csv_name()
-        self.surr_data_dir_path = self.set_data_source(config, data_source='data', data_type='surr')
-        self.set_raw_data_col()
-
-    def set_surr_csv_name(self):
-        if len(self.suffix) >0:
-            self.surr_csv = '__'.join([self.surr_csv_stem, self.suffix]).strip('__') if self.surr_csv_stem is not None else None
-        else:
-            self.surr_csv = self.surr_csv_stem
-
-    def set_raw_data_col(self):
-        if len(self.suffix) > 0:
-            self.raw_data_col = '__'.join([self.raw_data_var, self.suffix]).strip('__') if self.raw_data_var is not None else None
-        else:
-            self.raw_data_col = self.raw_data_var
-
-    def set_data_source(self, config,data_source='data' , var_data_csv=None, data_type='raw'):
-        if var_data_csv is None:
-            if data_type == 'raw':
-                var_data_csv = self.raw_data_csv
-            elif data_type in ['surr', 'surrogate']:
-                var_data_csv = self.surr_csv
-
-        data_path, _ = choose_data_source(self.proj_dir, config, data_source, data_type=data_type, var_data_csv=var_data_csv)
-        data_path = Path(data_path).parent
-        return data_path
-
-    def get_color(self, config):
-        if self.color is None:
-            color_map = config.pal.to_dict()
-            if color_map is not None and self.var_id in color_map:
-                self.color = color_map[self.var_id]
-            else:
-                self.color = 'black'
-
-
-class VarObject(DataVarConfig):
-    def __init__(self, config, var_id=None, proj_dir=None, data_var_config=None):
-        if data_var_config is not None and isinstance(data_var_config, DataVarConfig):
-            # Copy all attributes from the provided DataVarConfig
-            for key, value in data_var_config.__dict__.items():
-                setattr(self, key, value)
-        else:
-            # Initialize as a new DataVarConfig
-            super().__init__(config, var_id, proj_dir)
-
-        self.ts = None
-        self.ts_type = None # 'real' or 'surr'
-        self.surr_num = None
-        self.col_name = None
-        self.time_var = None
-
-    def set_col_name(self):
-        if self.ts_type == 'raw':
-            self.col_name = self.raw_data_col
-        elif self.ts_type == 'surr':
-            self.col_name = f'{self.surr_prefix}_{self.surr_num}'
-
-    def standardize_time_var(self, specified_time_var, df, other_col):
-
-        if ('time' not in df.columns) and (specified_time_var is not None):
-            df = df.rename(columns={specified_time_var: 'time'})
-        if 'date' in df.columns:
-            df = df.rename(columns={'date': 'time'})
-        df['time'] = df['time'].astype('int')
-
-        return df, 'time'
-
-    def get_raw(self):
-        # get raw timeseries data from csv
-        self.ts_type = 'raw'
-        self.set_col_name()
-
-        if (self.raw_data_dir_path/check_csv(self.raw_data_csv)).exists() is True:
-            raw_data = pd.read_csv(self.raw_data_dir_path/check_csv(self.raw_data_csv))
-            # print('raw data read', raw_data.head())
-            raw_data = remove_extra_index(raw_data)
-            # print('raw data before standardize', raw_data.head())
-
-            raw_data, time_var = self.standardize_time_var(self.raw_time_var, raw_data, self.col_name)
-            self.time_var = time_var
-            # print('raw data', raw_data.head())
-
-            self.ts = raw_data[[self.time_var, self.col_name]].copy()
-
-    def get_surr(self, surr_num=None):
-        # print('sur', self.surr_data_dir_path / check_csv(self.surr_csv))
-        if (self.surr_data_dir_path / check_csv(self.surr_csv)).exists() is True:
-            surr_data = pd.read_csv(self.surr_data_dir_path / check_csv(self.surr_csv))
-            surr_data = remove_extra_index(surr_data)
-            # print(surr_data)
-
-            # self.surr_num = self.surr_num if self.surr_num is not None else surr_num
-            self.set_col_name()
-            self.ts_type = 'surr'
-
-            surr_data, time_var = self.standardize_time_var(self.raw_time_var, surr_data, self.col_name)
-            self.time_var = time_var
-            # print('surr data', surr_data[[self.time_var, self.col_name]].head())
-            self.ts = surr_data[[self.time_var, self.col_name]].copy()
-            # print(self.ts.head())
+#
+# class DataVarConfig:
+#     def __init__(self, config, var_id, proj_dir, suffix_label=None, suffix_ind=None):
+#
+#         self.var_id = var_id
+#         self.suffix_label= suffix_label if suffix_label is not None else ''
+#         self.suffix_ind = suffix_ind if suffix_ind is not None else ''
+#         self.suffix = f'{self.suffix_label}{self.suffix_ind}'
+#
+#         self.raw_data_csv = None
+#         self.raw_data_var = None
+#         self.raw_data_col = None
+#         self.raw_time_var = None
+#         self.var = None  # e.g. 'temp'
+#
+#         self.surr_csvs = None
+#         self.surr_csv_stem = None
+#         self.surr_csv = None
+#         self.surr_time_var = None
+#         self.surr_prefix = None
+#         self.surr_var = None  # e.g. 'temp'
+#         # self.surr_num = None
+#
+#         self.obs_type = None
+#         self.source = None
+#         self.unit = None
+#         self.var_label = None
+#         self.var_name = None
+#         self.year = None
+#         self.color = None
+#
+#         # TODO there is some future redundancy here and sketchy path handling
+#         self.raw_data_dir_path = None
+#         self.surr_data_dir_path = None
+#         self.proj_dir = None
+#         self.populate(config, proj_dir)
+#
+#
+#     def populate(self, config, proj_dir):
+#
+#         self.proj_dir = proj_dir
+#         try:
+#             var_yaml = config.get_dynamic_attr("data_vars.{var}.config", self.var_id)
+#             # load variable-specific settings from config
+#             self.load_from_var_yaml(var_yaml, proj_dir)
+#             var_info = var_yaml.get(self.var_id, None) if var_yaml is not None else None
+#         except:
+#             print(f'reading var yaml for {self.var_id} failed, trying config')
+#             self.load_from_config( config, proj_dir)
+#
+#     def load_from_var_yaml(self, var_yaml, proj_dir):
+#         print('load_from_var_yaml function is a stub - needs to be implemented')
+#         pass
+#
+#     # TODO fix pointers for surrogates
+#     def load_from_config(self, config, proj_dir):
+#
+#         var_id = self.var_id
+#         var_info = config.get_dynamic_attr("{var}", self.var_id)
+#         var_info = var_info.to_dict()
+#
+#         real_ts_d = var_info.pop('real_ts', None)
+#         surr_ts_d = var_info.pop('surrogate_ts', None)
+#
+#
+#         if 'raw_data_var' not in var_info.keys():
+#             if 'data_var' in var_info.keys():
+#                 data_var = var_info.pop('data_var', None)
+#                 var_info['raw_data_var'] = data_var
+#
+#         if 'raw_data_csv' not in var_info.keys():
+#             if 'data_csv' in var_info.keys():
+#                 data_csv = var_info.pop('data_csv', None)
+#                 var_info['raw_data_csv'] = data_csv
+#
+#         if 'raw_time_var' not in var_info.keys():
+#             time_var = var_info.pop('raw_time_var', None)
+#             if 'time_var' in var_info.keys():
+#                 time_var = var_info.pop('time_var', None)
+#             else:
+#                 time_var = 'time'
+#             var_info['raw_time_var'] = time_var
+#
+#         if 'surr_time_var' not in var_info.keys():
+#             var_info['surr_time_var']='date'
+#
+#
+#         if 'surr_var' not in var_info.keys() or var_info['surr_var'] is None:
+#             var_info['surr_var'] = var_info.get('var', None)
+#
+#         try:
+#             surr_csvs = config.get_dynamic_attr("{var}.surr_file_name", self.var_id)
+#         except:
+#             surr_csvs = None
+#
+#         if surr_csvs is not None:
+#             surr_csvs = correct_iterable(surr_csvs)
+#             if len(surr_csvs) == 1:
+#                 var_info['surr_csv_stem'] = surr_csvs[0].replace('.csv', '').replace('.txt', '')
+#             else:
+#                 print(f'Multiple surrogate csvs found for {self.var_id}: {surr_csvs}')
+#
+#         var_info['surr_prefix'] = var_info.get('surr_prefix', var_info.get('surr_var', None))
+#         for key in var_info.keys():
+#             if hasattr(self, key):
+#                 setattr(self, key, var_info[key])
+#
+#         self.raw_data_dir_path = self.set_data_source(config, data_source='data', data_type='raw')
+#         self.get_color(config)
+#         self.set_surr_csv_name()
+#         self.surr_data_dir_path = self.set_data_source(config, data_source='data', data_type='surr')
+#         self.set_raw_data_col()
+#
+#     def set_surr_csv_name(self):
+#         if len(self.suffix) >0:
+#             self.surr_csv = '__'.join([self.surr_csv_stem, self.suffix]).strip('__') if self.surr_csv_stem is not None else None
+#         else:
+#             self.surr_csv = self.surr_csv_stem
+#
+#     def set_raw_data_col(self):
+#         if len(self.suffix) > 0:
+#             self.raw_data_col = '__'.join([self.raw_data_var, self.suffix]).strip('__') if self.raw_data_var is not None else None
+#         else:
+#             self.raw_data_col = self.raw_data_var
+#
+#     def set_data_source(self, config,data_source='data' , var_data_csv=None, data_type='raw'):
+#         if var_data_csv is None:
+#             if data_type == 'raw':
+#                 var_data_csv = self.raw_data_csv
+#             elif data_type in ['surr', 'surrogate']:
+#                 var_data_csv = self.surr_csv
+#
+#         data_path, _ = choose_data_source(self.proj_dir, config, data_source, data_type=data_type, var_data_csv=var_data_csv)
+#         data_path = Path(data_path).parent
+#         return data_path
+#
+#     def get_color(self, config):
+#         if self.color is None:
+#             color_map = config.pal.to_dict()
+#             if color_map is not None and self.var_id in color_map:
+#                 self.color = color_map[self.var_id]
+#             else:
+#                 self.color = 'black'
+#
+#
+# class VarObject(DataVarConfig):
+#     def __init__(self, config, var_id=None, proj_dir=None, data_var_config=None):
+#         if data_var_config is not None and isinstance(data_var_config, DataVarConfig):
+#             # Copy all attributes from the provided DataVarConfig
+#             for key, value in data_var_config.__dict__.items():
+#                 setattr(self, key, value)
+#         else:
+#             # Initialize as a new DataVarConfig
+#             super().__init__(config, var_id, proj_dir)
+#
+#         self.ts = None
+#         self.ts_type = None # 'real' or 'surr'
+#         self.surr_num = None
+#         self.col_name = None
+#         self.time_var = None
+#
+#     def set_col_name(self):
+#         if self.ts_type == 'raw':
+#             self.col_name = self.raw_data_col
+#         elif self.ts_type == 'surr':
+#             self.col_name = f'{self.surr_prefix}_{self.surr_num}'
+#
+#     def standardize_time_var(self, specified_time_var, df, other_col):
+#
+#         if ('time' not in df.columns) and (specified_time_var is not None):
+#             df = df.rename(columns={specified_time_var: 'time'})
+#         if 'date' in df.columns:
+#             df = df.rename(columns={'date': 'time'})
+#         df['time'] = df['time'].astype('int')
+#
+#         return df, 'time'
+#
+#     def get_raw(self):
+#         # get raw timeseries data from csv
+#         self.ts_type = 'raw'
+#         self.set_col_name()
+#
+#         if (self.raw_data_dir_path/check_csv(self.raw_data_csv)).exists() is True:
+#             raw_data = pd.read_csv(self.raw_data_dir_path/check_csv(self.raw_data_csv))
+#             # print('raw data read', raw_data.head())
+#             raw_data = remove_extra_index(raw_data)
+#             # print('raw data before standardize', raw_data.head())
+#
+#             raw_data, time_var = self.standardize_time_var(self.raw_time_var, raw_data, self.col_name)
+#             self.time_var = time_var
+#             # print('raw data', raw_data.head())
+#
+#             self.ts = raw_data[[self.time_var, self.col_name]].copy()
+#
+#     def get_surr(self, surr_num=None):
+#         # print('sur', self.surr_data_dir_path / check_csv(self.surr_csv))
+#         if (self.surr_data_dir_path / check_csv(self.surr_csv)).exists() is True:
+#             surr_data = pd.read_csv(self.surr_data_dir_path / check_csv(self.surr_csv))
+#             surr_data = remove_extra_index(surr_data)
+#             # print(surr_data)
+#
+#             # self.surr_num = self.surr_num if self.surr_num is not None else surr_num
+#             self.set_col_name()
+#             self.ts_type = 'surr'
+#
+#             surr_data, time_var = self.standardize_time_var(self.raw_time_var, surr_data, self.col_name)
+#             self.time_var = time_var
+#             # print('surr data', surr_data[[self.time_var, self.col_name]].head())
+#             self.ts = surr_data[[self.time_var, self.col_name]].copy()
+#             # print(self.ts.head())
 
 
 class CCMConfig(RunConfig):
@@ -1341,7 +1403,7 @@ class CCMConfig(RunConfig):
         # generate filename of CCM CSV based on template in config
         pset_d = self.to_dict()
         try:
-            file_name_template = config.output.file_format_csv
+            file_name_template = config.output.csv.file_format
             file_name = template_replace(file_name_template, pset_d, return_replaced=False)# f'{replace(file_name_template, pset_d)}.csv'
         except:
             file_name = f"{pset_d['pset_id']}_E{pset_d['E']}_tau{pset_d['tau']}__{pset_d['surr_var']}{pset_d['surr_num']}.csv"
@@ -1362,7 +1424,7 @@ class CCMConfig(RunConfig):
 
     def set_output_calc_sub(self, config, output_dir, file_name):
 
-        grp_path_template = config.get_dynamic_attr("output.{var}", 'dir_structure_csv')  # config.output.grp_dir_structure
+        grp_path_template = config.output.csv.dir_structure#config.get_dynamic_attr("output.{var}", 'dir_structure_csv')  # config.output.grp_dir_structure
         grp_path_template_filled = template_replace(grp_path_template, self.to_dict(), return_replaced=False)
         grp_path = self.output_dir / grp_path_template_filled
 
@@ -1413,132 +1475,132 @@ class CCMConfig(RunConfig):
 
         self.df = shifted.reset_index(drop=True)
 
-
-class RelationshipSide:
-    def __init__(self, r, relationship=None, var_x='temp', var_y='TSI', influence_word='causes'):
-        self.var_x = var_x if relationship is None else relationship.var_x
-        self.var_y = var_y if relationship is None else relationship.var_y
-        self.influence_word = influence_word
-
-        self.surr_rx_count = None
-        self.surr_rx_count_outperforming = None
-        self.surr_ry_count = None
-        self.surr_ry_count_outperforming = None
-        self.delta_rho = None
-        self.maxlibsize_rho = None
-        self.lag = None
-        self.surr_rx_outperforming_frac = None
-        self.surr_ry_outperforming_frac = None
-
-
-        # self.surr_rx
-        # self.surr_ry
-
-        if r == 'r1':
-            self.pattern = 'y causes x'
-        elif r == 'r2':
-            self.pattern = 'x causes y'
-
-
-    @property
-    def surr_rx(self):
-        return self.pattern.replace('x', f'{self.var_x} (surr)').replace('y', self.var_y).replace('causes', self.influence_word)
-
-    @property
-    def surr_ry(self):
-        return self.pattern.replace('y', f'{self.var_y} (surr)').replace('x', self.var_x).replace('causes', self.influence_word)
-
-    @property
-    def r(self):
-        return self.pattern.replace('x', self.var_x).replace('y', self.var_y).replace('causes', self.influence_word)
-
-
-
-class Relationship:
-
-    def __init__(self, var_x='temp', var_y='TSI', surr_flag='neither'):
-
-        self.influence_word = 'causes'
-        self.var_x = var_x
-        self.var_y = var_y
-        self.surr_flag = surr_flag
-
-        # self.active_r1 = self.set_active_r1()
-        # self.active_r2 = self.set_active_r2()
-
-
-    def set_influence_verb(self, verb):
-        self.influence_word = verb
-
-
-    def set_active_r1(self):
-        if self.surr_flag in ('x', self.var_x):
-            return self.surr_r1x
-        elif self.surr_flag in ('neither'):
-            return self.r1
-        elif self.surr_flag in ('y', self.var_y):
-            return self.surr_r1y
-        elif self.surr_flag in ('both'):
-            return self.surr_r1yx
-
-
-    def set_active_r2(self):
-        if self.surr_flag in ('x', self.var_x):
-            return self.surr_r2x
-        elif self.surr_flag in ('neither'):
-            return self.r2
-        elif self.surr_flag in ('y', self.var_y):
-            return self.surr_r2y
-        elif self.surr_flag in ('both'):
-            return self.surr_r2yx
-
-    @property
-    def r1(self):
-        return f'{self.var_y} {self.influence_word} {self.var_x}'
-
-    @property
-    def r2(self):
-        return f'{self.var_x} {self.influence_word} {self.var_y}'
-
-    @property
-    def surr_r1x(self):
-        return f'{self.var_y} {self.influence_word} {self.var_x} (surr)'
-
-    @property
-    def surr_r1y(self):
-        return f'{self.var_y} (surr) {self.influence_word} {self.var_x}'
-
-    @property
-    def surr_r2x(self):
-        return f'{self.var_x} (surr) {self.influence_word} {self.var_y}'
-
-    @property
-    def surr_r2y(self):
-        return f'{self.var_x} {self.influence_word} {self.var_y} (surr)'
-
-    @property
-    def surr_r2xy(self):
-        return f'{self.var_x} (surr) {self.influence_word} {self.var_y} (surr)'
-
-    @property
-    def surr_r2yx(self):
-        return f'{self.var_x} (surr) {self.influence_word} {self.var_y} (surr)'
-
-    @property
-    def surr_r2both(self):
-        return f'{self.var_x} (surr) {self.influence_word} {self.var_y} (surr)'
-
-    @property
-    def surr_r1xy(self):
-        return f'{self.var_y} (surr) {self.influence_word} {self.var_x} (surr)'
-
-    @property
-    def surr_r1yx(self):
-        return f'{self.var_y} (surr) {self.influence_word} {self.var_x} (surr)'
-
-    @property
-    def surr_r1both(self):
-        return f'{self.var_y} (surr) {self.influence_word} {self.var_x} (surr)'
-
-
-
+#
+# class RelationshipSide:
+#     def __init__(self, r, relationship=None, var_x='temp', var_y='TSI', influence_word='causes'):
+#         self.var_x = var_x if relationship is None else relationship.var_x
+#         self.var_y = var_y if relationship is None else relationship.var_y
+#         self.influence_word = influence_word
+#
+#         self.surr_rx_count = None
+#         self.surr_rx_count_outperforming = None
+#         self.surr_ry_count = None
+#         self.surr_ry_count_outperforming = None
+#         self.delta_rho = None
+#         self.maxlibsize_rho = None
+#         self.lag = None
+#         self.surr_rx_outperforming_frac = None
+#         self.surr_ry_outperforming_frac = None
+#
+#
+#         # self.surr_rx
+#         # self.surr_ry
+#
+#         if r == 'r1':
+#             self.pattern = 'y causes x'
+#         elif r == 'r2':
+#             self.pattern = 'x causes y'
+#
+#
+#     @property
+#     def surr_rx(self):
+#         return self.pattern.replace('x', f'{self.var_x} (surr)').replace('y', self.var_y).replace('causes', self.influence_word)
+#
+#     @property
+#     def surr_ry(self):
+#         return self.pattern.replace('y', f'{self.var_y} (surr)').replace('x', self.var_x).replace('causes', self.influence_word)
+#
+#     @property
+#     def r(self):
+#         return self.pattern.replace('x', self.var_x).replace('y', self.var_y).replace('causes', self.influence_word)
+#
+#
+#
+# class Relationship:
+#
+#     def __init__(self, var_x='temp', var_y='TSI', surr_flag='neither'):
+#
+#         self.influence_word = 'causes'
+#         self.var_x = var_x
+#         self.var_y = var_y
+#         self.surr_flag = surr_flag
+#
+#         # self.active_r1 = self.set_active_r1()
+#         # self.active_r2 = self.set_active_r2()
+#
+#
+#     def set_influence_verb(self, verb):
+#         self.influence_word = verb
+#
+#
+#     def set_active_r1(self):
+#         if self.surr_flag in ('x', self.var_x):
+#             return self.surr_r1x
+#         elif self.surr_flag in ('neither'):
+#             return self.r1
+#         elif self.surr_flag in ('y', self.var_y):
+#             return self.surr_r1y
+#         elif self.surr_flag in ('both'):
+#             return self.surr_r1yx
+#
+#
+#     def set_active_r2(self):
+#         if self.surr_flag in ('x', self.var_x):
+#             return self.surr_r2x
+#         elif self.surr_flag in ('neither'):
+#             return self.r2
+#         elif self.surr_flag in ('y', self.var_y):
+#             return self.surr_r2y
+#         elif self.surr_flag in ('both'):
+#             return self.surr_r2yx
+#
+#     @property
+#     def r1(self):
+#         return f'{self.var_y} {self.influence_word} {self.var_x}'
+#
+#     @property
+#     def r2(self):
+#         return f'{self.var_x} {self.influence_word} {self.var_y}'
+#
+#     @property
+#     def surr_r1x(self):
+#         return f'{self.var_y} {self.influence_word} {self.var_x} (surr)'
+#
+#     @property
+#     def surr_r1y(self):
+#         return f'{self.var_y} (surr) {self.influence_word} {self.var_x}'
+#
+#     @property
+#     def surr_r2x(self):
+#         return f'{self.var_x} (surr) {self.influence_word} {self.var_y}'
+#
+#     @property
+#     def surr_r2y(self):
+#         return f'{self.var_x} {self.influence_word} {self.var_y} (surr)'
+#
+#     @property
+#     def surr_r2xy(self):
+#         return f'{self.var_x} (surr) {self.influence_word} {self.var_y} (surr)'
+#
+#     @property
+#     def surr_r2yx(self):
+#         return f'{self.var_x} (surr) {self.influence_word} {self.var_y} (surr)'
+#
+#     @property
+#     def surr_r2both(self):
+#         return f'{self.var_x} (surr) {self.influence_word} {self.var_y} (surr)'
+#
+#     @property
+#     def surr_r1xy(self):
+#         return f'{self.var_y} (surr) {self.influence_word} {self.var_x} (surr)'
+#
+#     @property
+#     def surr_r1yx(self):
+#         return f'{self.var_y} (surr) {self.influence_word} {self.var_x} (surr)'
+#
+#     @property
+#     def surr_r1both(self):
+#         return f'{self.var_y} (surr) {self.influence_word} {self.var_x} (surr)'
+#
+#
+#
