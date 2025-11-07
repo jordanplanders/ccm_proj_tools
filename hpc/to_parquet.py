@@ -141,7 +141,9 @@ def setup_conversion_from_calc_grp(output_dir, config, calc_grp_d):
     parts_d = calc_grp_d  #calc_grps_df.iloc[ind].to_dict()
     # construct path pattern
     fallback_E_tau_grp_pattern = 'knn_{knn}/tp_{Tp}/{col_var_id}_{target_var_id}/E{E}_tau{tau}'
-    E_tau_grp_pattern = config.output.dir_structure if config is not None else fallback_E_tau_grp_pattern
+    # E_tau_grp_pattern = config.output.dir_structure if config is not None else fallback_E_tau_grp_pattern
+    E_tau_grp_pattern = config.output.parquet.dir_structure if config is not None else fallback_E_tau_grp_pattern
+
     #template replacement
     e_tau_dir_read = output_dir/template_replace(E_tau_grp_pattern, parts_d, return_replaced=False)
     e_tau_dir_write = output_dir/'parquet'/template_replace(E_tau_grp_pattern, parts_d, return_replaced=False)
