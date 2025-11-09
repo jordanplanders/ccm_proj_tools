@@ -3,7 +3,7 @@ import collections.abc
 import re
 import os
 import sys
-import copy
+from copy import deepcopy
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -110,12 +110,12 @@ def get_static(obj):
 
 def template_replace(template, d, return_replaced=True):
     replaced = []
-    old_template = copy.copy(template)
+    old_template = template
     for key, value in d.items():
         template = template.replace(f'{{{key}}}', str(value))
         if template != old_template:
             replaced.append(key)
-            old_template = copy.copy(template)
+            old_template = template
     if return_replaced is False:
         return template
 
@@ -330,26 +330,33 @@ class RunConfig:
         self.relation=None
 
         self.pset_id=None
+        self.train_ind_i = None
+        self.train_ind_f = None
 
         self.populate(grp_d)
         self.tmp_dir = tmp_dir
 
         self.proj_dir = None
+
         # self.exclusion_radius = np.abs(self.tau * (self.E - 1))
 
     def populate(self, grp_d):
+        # print('Populating RunConfig with traits:', grp_d, file=sys.stdout, flush=True)
         for key, value in grp_d.items():
             if hasattr(self, key):
                 setattr(self, key, value)
+                # print('Sets RunConfig trait', key, 'to', value, file=sys.stdout, flush=True)
 
         if self.pset_id is None:
             self.pset_id = grp_d.get('id', None)
+            # print('Sets RunConfig pset_id to', self.pset_id, file=sys.stdout, flush=True)
 
-        self.train_ind_i = int(self.train_ind_i)
-        self.train_ind_f = int(self.train_ind_f)
+        # self.train_ind_i = int(self.train_ind_i)
+        # self.train_ind_f = int(self.train_ind_f)
+        # print('RunConfig populated with traits:', self.to_dict(), file=sys.stdout, flush=True)
 
     def copy(self):
-        return copy.deepcopy(self)
+        return deepcopy(self)
 
     @property
     def var_x(self):
@@ -571,7 +578,7 @@ class DataGroup:
 
         combined_filter = reduce(operator.and_, filters.values())
         table = dset.to_table(filter=combined_filter)
-        print('filtered table rows', table.num_rows)
+        print('_internal_query: filtered table rows', table.num_rows, file=sys.stdout, flush=True)
 
         grp_info = {}
         for key in self.parent_config.traits:
@@ -579,6 +586,7 @@ class DataGroup:
                 unique_elements = pc.unique(table[key]).to_pylist()
                 grp_info[key] = unique_elements
 
+        print('_internal_query: initial grp_info traits:', grp_info, file=sys.stdout, flush=True)
         for key, value in all_traits.items():
             if value is None:
                 continue
@@ -589,9 +597,10 @@ class DataGroup:
             if outliers is not None:
                 grp_info[key] = correct_iterable(outliers)
 
-
+        print('_internal_query: final grp_info traits:', grp_info, file=sys.stdout, flush=True)
         file_group_config = RunConfig(grp_info, tmp_dir=self.tmp_dir)
-
+        print('_internal_query: RunConfig traits:', file_group_config.to_dict(), file=sys.stdout, flush=True)
+        print('_internal_query: returning table rows', table.num_rows, file=sys.stdout, flush=True)
         return file_group_config, table
 
 
@@ -650,32 +659,37 @@ class DataGroup:
                                     file_dict[key] = self.nonstatic_traits[key]
                             new_config.populate(file_dict)
 
-                            filtered_table = None
                             try:
                                 loaded_ds = ds.dataset(str(file_path), format="parquet")
                                 groupconfig_file, filtered_table  = self._internal_query(loaded_ds,
                                                                                     query_config=new_config)
-                                print('filtered table rows after query', filtered_table.num_rows)
+                                print('get_files: filtered table rows after query', filtered_table.num_rows, 'for file', file_path,'fail status:', fail,file=sys.stdout, flush=True)
                             except:
+                                filtered_table = None
                                 fail=True
 
+                            # print('fail status after filtering', fail, 'for file', file_path,'filtered_table', filtered_table, file=sys.stdout, flush=True)
+
                             if filtered_table is None:
+                                print('get_files: filtered table is None, failing for file', file_path, file=sys.stdout, flush=True)
                                 fail = True
 
                             elif filtered_table.num_rows == 0:
+                                print('get_files: filtered table has 0 rows, failing for file', file_path, file=sys.stdout, flush=True)
                                 fail = True
 
                         if fail is False:
                             groupconfig_file.output_path = [file_path]
+                            print('did not fail for file', file_path, file=sys.stdout, flush=True)
                             file_list.append(groupconfig_file)
                             for key in groupconfig_file.traits:
                                 new_values = correct_iterable(getattr(groupconfig_file, key)) if getattr(groupconfig_file, key) is not None else []
                                 for val in new_values:
                                     nonstatic_updates[key].add(val)
                         else:
-                            missing_files.append((new_config, file_path))
+                            # missing_files.append((new_config, file_path))
                             if file_path not in missing_files.keys():
-                                missing_files[file_path] = file_dict
+                                missing_files[file_path]=new_config
                             else:
                                 for key in file_dict.keys():
                                     if key not in missing_files[file_path].keys():
@@ -684,9 +698,10 @@ class DataGroup:
                                         missing_files[file_path][key] = list(
                                             set(correct_iterable(missing_files[file_path][key])) | set(
                                                 correct_iterable(file_dict[key])))
+                            print('missing files', len(missing_files), file=sys.stdout, flush=True)
 
                     except ValueError as e:
-                        print(e)
+                        print(e, file=sys.stderr, flush=True)
 
         nonstatic_updates = {key: list(value) for key, value in nonstatic_updates.items()}
         for key in nonstatic_updates.keys():
