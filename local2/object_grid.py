@@ -5,6 +5,7 @@ import sys
 import gc
 import numpy as np
 import pandas as pd
+import copy
 pd.option_context('mode.use_inf_as_na', True)
 
 from utils.config_parser import load_config
@@ -16,11 +17,12 @@ from data_obj.plotting_objects import *
 
 
 def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config):
-
+    print(f'Processing E={grp_info["E"]}, tau={grp_info["tau"]}', output_location / 'parquet', file=sys.stdout, flush=True)
     test_grp = DataGroup(grp_info, tmp_dir=tmp_dir)
     test_grp.get_files(config, output_location / 'parquet',
                        file_name_pattern='E{E}_tau{tau}_lag{lag}', source='parquet')
 
+    print(f'\tfound {len(test_grp.file_list)} files for E={grp_info["E"]}, tau={grp_info["tau"]}', file=sys.stdout, flush=True)
     if len(test_grp.file_list) < 1:
         print("Skipping because no files found.")
         return
@@ -32,11 +34,10 @@ def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config):
             name = groupconfig_file.output_path[0].name
         except:
             name = groupconfig_file.output_path
+        print(f'\t1 processing file {ij + 1}/{len(test_grp.file_list)}: {name}', file=sys.stdout, flush=True)
         output_col = groupconfig_file.pull_output(to_table=False).calc_delta_rho().aggregate_libsize()
         print(f'\tcalculated delta rho and libsize aggregation {name}', file=sys.stdout, flush=True)
 
-        output_col.table.clear_table()
-        print('\tcleared table from memory', file=sys.stdout, flush=True)
         output_collections.append(output_col)
 
     new_output_col = OutputCollection(in_table=output_collections, grp_specs=test_grp.get_group_config(), tmp_dir=tmp_dir)
@@ -87,7 +88,7 @@ if __name__ == "__main__":
     gen_config = 'proj_config'
     config = load_config(proj_dir / f'{gen_config}.yaml')
 
-    obj_grid_file_name = args.file if args.file is not None else f'{proj_name}_wu_obj_grid.joblib'
+    obj_grid_file_name = args.file if args.file is not None else f'{proj_name}_obj_grid.joblib'
     group_file_name = args.group_file if args.group_file is not None else config.csvs.e_tau_grps
     tmp_dir = args.dir if args.dir is not None else'tmp' #target directory for cell object files and object_grid
 
@@ -97,9 +98,13 @@ if __name__ == "__main__":
         ind = int(sys.argv[-1])
 
     calc_location = set_calc_path(None, proj_dir, config, '')
+    print(f'Calculation location: {calc_location}', file=sys.stdout, flush=True)
+    print(f'Read e_tau_grps_df from {group_file_name}.', file=sys.stdout, flush=True)
+
     e_tau_grps_df = pd.read_csv(calc_location / check_csv(group_file_name))
 
     output_location = set_output_path(None, calc_location, config)
+    # output_parquet_location = output_location / output_config.dir_structure
     tmp_dir = proj_dir / tmp_dir
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -119,13 +124,13 @@ if __name__ == "__main__":
     tau_is = {tau: ik for ik, tau in enumerate(np.arange(min(tau_vals), max(tau_vals) + 1))}
 
     try:
-        object_grid = joblib_safe_load(tmp_dir / obj_grid_file_name, mmap_mode=None)
+        object_grid = joblib_cloud_load(tmp_dir / obj_grid_file_name)
     except:
         object_grid = {}
 
-    if (E, tau) not in object_grid:
+    if (E, tau) not in object_grid.keys():
         object_grid[(E, tau)] = process_config(row, E_is[E], tau_is[tau], tmp_dir, output_location, config)
-        joblib_atomic_dump(object_grid, tmp_dir/obj_grid_file_name, compress=3,
+        joblib_cloud_atomic_dump(object_grid, tmp_dir/obj_grid_file_name, compress=3,
                            protocol=5)
         del object_grid
         gc.collect()
