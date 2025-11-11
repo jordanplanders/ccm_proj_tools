@@ -43,6 +43,16 @@ import cloudpickle
 # dump
 import os, tempfile, pickle, joblib, cloudpickle
 
+# def log_print_helper(msg, file=sys.stdout, flush=True):
+#     print(msg, file=file, flush=flush)
+
+# def log_print_helper(msg, file=sys.stdout, flush=True, toggle=True):
+#     if toggle is True:
+#         print(msg, file=file, flush=flush)
+#     else:
+#         pass
+# log_print = lambda msg, file=sys.stdout, flush=True: log_print_helper(msg, file=file, flush=flush, toggle=False)
+
 def _atomic_write(path, writer):
     d = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(prefix=".tmp_", dir=d)
@@ -188,9 +198,25 @@ def compute_delta_rho_grp(
         annotation: str = ""
 ):
     """
-    lag_tbl columns required: 'LibSize' (int/float), 'rho' (float)
-    gd: dict of group descriptors to copy into outputs
+    Compute delta rho statistics and full vectors from lagged correlation table.
+
+    Parameters
+        - lag_tbl columns required: 'LibSize' (int/float), 'rho' (float)
+        - gd: dict of group descriptors to copy into outputs
+        - stats: whether to compute summary statistics table
+        - full: whether to compute full vectors table
+
+    Calculates
+        - mean rho in min libsize band (libsize < min_libsize + min_window)
+        - mean rho in max libsize band (libsize > max_libsize - max_window)
+        - best libsize (argmax of mean rho by libsize)
+        - mean rho in best libsize window (best_libsize +/- best_window_halfwidth)
+        - delta rho = max libsize mean rho - min libsize mean rho
+        - full vectors with bootstrap-style paired sampling (with replacement)
+
     Returns (stats_tbl | None, full_tbl | None) as pyarrow.Table objects.
+
+    Used by OutputGrp.calc_delta_rho
     """
 
     # lag_tbl = self.table.full
@@ -211,12 +237,6 @@ def compute_delta_rho_grp(
 
     min_tbl = lag_tbl.filter(min_mask)
     max_tbl = lag_tbl.filter(max_mask)
-
-    # mean rho by LibSize
-    # gb = lag_tbl.group_by(['LibSize']).aggregate([('rho', 'mean')])  # cols: LibSize, rho_mean
-    # # best LibSize (argmax of rho_mean)
-    # argmax_idx = pc.argmax(gb['rho_mean']).as_py()
-    # best_libsize = gb['LibSize'][argmax_idx].as_py()
 
     gb = lag_tbl.group_by(["LibSize"]).aggregate([("rho", "mean")])  # columns: LibSize, rho_mean
     # sort by descending rho_mean
@@ -279,7 +299,6 @@ def compute_delta_rho_grp(
 
         stats_tbl = pa.table(cols)
 
-
     # full vectors with bootstrap-style paired sampling (with replacement)
     full_tbl = None
     if full:
@@ -303,6 +322,19 @@ def compute_delta_rho_grp(
 
 #########################################
 class RunConfig:
+    '''
+    Configuration for a single CCM run, but can be extended to a group of runs
+    grp_d: dictionary of group-level traits
+
+    Methods:
+        populate(grp_d): populate the RunConfig attributes from a dictionary
+        copy(): create a deep copy of the RunConfig object
+        to_dict(): convert the RunConfig attributes to a dictionary
+        pull_output(to_table=False, limit_surr=True): pull output data based on the RunConfig attributes
+        set_var_objs(proj_config, proj_dir): set variable objects for the RunConfig
+
+    Inherited by DataGroup class
+    '''
     def __init__(self, grp_d, tmp_dir=None):
         self.E = None
         self.tau = None
@@ -341,7 +373,6 @@ class RunConfig:
         # self.exclusion_radius = np.abs(self.tau * (self.E - 1))
 
     def populate(self, grp_d):
-        # print('Populating RunConfig with traits:', grp_d, file=sys.stdout, flush=True)
         for key, value in grp_d.items():
             if hasattr(self, key):
                 setattr(self, key, value)
@@ -349,11 +380,6 @@ class RunConfig:
 
         if self.pset_id is None:
             self.pset_id = grp_d.get('id', None)
-            # print('Sets RunConfig pset_id to', self.pset_id, file=sys.stdout, flush=True)
-
-        # self.train_ind_i = int(self.train_ind_i)
-        # self.train_ind_f = int(self.train_ind_f)
-        # print('RunConfig populated with traits:', self.to_dict(), file=sys.stdout, flush=True)
 
     def copy(self):
         return deepcopy(self)
@@ -390,69 +416,11 @@ class RunConfig:
         print('pulling from', file_path)
         dset = ds.dataset(str(file_path), format="parquet")
         all_traits = self.to_dict()
-        # if limit_surr is True:
-        #     if 'lag' != 0:
-        #         all_traits['surr_var'] = 'neither'
+
         filters = {key: ds.field(key).isin(correct_iterable(value)) for key, value in all_traits.items() if
                    value is not None and key in dset.schema.names}
         combined_filter = reduce(operator.and_, filters.values())
         filtered_table = dset.to_table(filter=combined_filter)
-
-
-
-        # calc_grp_cols = ['E', 'tau', 'Tp', 'lag', 'knn', 'surr_var', 'surr_num', 'x_id', 'x_age_model_ind', 'x_var', 'y_id', 'y_age_model_ind', 'y_var', 'LibSize', 'relation']
-        #
-        # aggregated_cols = [col for col in filtered_table.schema.names if
-        #                    (col not in calc_grp_cols) and ('id' not in col) and ('ind' not in col) and (
-        #                                filtered_table[col].type in [pa.float32(), pa.float64(), pa.int32(), pa.int64()])]
-        #
-        # all_cols = calc_grp_cols+ aggregated_cols
-        # _filtered_table = filtered_table.select(all_cols)
-        # mask = pc.equal(_filtered_table['surr_var'], 'neither')
-        # real_table = _filtered_table.filter(mask)
-        #
-        # sampled_tables = []
-        # if real_table.num_rows >0:
-        #     real_sampled = sample_by_group(real_table, calc_grp_cols, 250, aggregated_cols)
-        #
-        #     # filters_d = {col: pc.unique(real_table[col]).to_pylist() for col in calc_grp_cols if
-        #     #              len(pc.unique(real_table[col]).to_pylist()) > 1}
-        #     # inverse_filter_d = {col: pc.unique(real_table[col]).to_pylist() for col in calc_grp_cols if
-        #     #              len(pc.unique(real_table[col]).to_pylist()) == 1}
-        #     #
-        #     # filter_combinations = [
-        #     #     dict(zip(filters_d.keys(), combo))
-        #     #     for combo in itertools.product(*filters_d.values())
-        #     # ]
-        #     #
-        #     # sub_tables = []
-        #     # for filter_comb in filter_combinations:
-        #     #     subset = filter_table(real_table, filter_comb)
-        #     #     subset_num_rows = subset.num_rows
-        #     #     if subset.num_rows>250:
-        #     #         rng = np.random.default_rng()
-        #     #         idx_best = rng.integers(0, subset_num_rows, size=250) if subset_num_rows > 0 else np.array([], dtype=np.int64)
-        #     #         metric_cols = {col: subset[col].take(pa.array(idx_best)) for col in aggregated_cols}
-        #     #         for k, v in inverse_filter_d.items():
-        #     #             metric_cols[k] = _as_lenN_array(get_static(v), len(idx_best))
-        #     #         for k, v in filter_comb.items():
-        #     #             metric_cols[k] = _as_lenN_array(get_static(v), len(idx_best))
-        #     #
-        #     #         full_tbl = pa.table(metric_cols)
-        #     #         sub_tables.append(full_tbl)
-        #     #     else:
-        #     #         sub_tables.append(subset)
-        #     # sub_tables = [sub_table.select(all_cols) for sub_table in sub_tables]
-        #     # real_sampled = pa.concat_tables(sub_tables)
-        #
-        #     sampled_tables.append(real_sampled)
-        # mask = pc.invert(pc.equal(_filtered_table['surr_var'], 'neither'))
-        # surr_table = _filtered_table.filter(mask)
-        # if surr_table.num_rows >0:
-        #     surr_sampled = sample_by_group(surr_table, calc_grp_cols, 100, aggregated_cols)
-        #     sampled_tables.append(surr_sampled)
-        #
-        # filtered_table = pa.concat_tables(sampled_tables)
 
         if to_table is True:
             return filtered_table
@@ -510,7 +478,11 @@ class RunConfig:
             raise ValueError("level must be 'below' or 'above'")
 
     def set_var_objs(self, proj_config, proj_dir):
-
+        '''
+        Set variable objects for the RunConfig based on project configuration.
+        proj_config: ProjectConfig object containing project-level configurations
+        proj_dir: Path object representing the project directory
+        '''
         col_DataVar = DataVarConfig(proj_config, self.col_var_id, proj_dir)
         self.col_var_obj = VarObject(proj_config, proj_dir, data_var_config=col_DataVar)
 
@@ -539,6 +511,25 @@ class RunConfig:
 
 
 class DataGroup:
+    '''
+    DataGroup object to manage a group of CCM runs based on shared traits.
+    grp_d: dictionary of group-level traits
+    Methods:
+        get_files(config, output_path, file_name_pattern=None, source='parquet'): retrieve files matching the group traits
+        pull_output(summary=True, full=False): pull output data from the group files
+
+    Attributes:
+        file_list: list of RunConfig objects for each file in the group
+        grp_d: dictionary of group-level traits
+        static_traits: dictionary of traits with single values
+        nonstatic_traits: dictionary of traits with multiple values
+        internal_traits: dictionary of traits determined during file retrieval
+        parent_config: RunConfig object representing the group-level configuration
+        output: OutputCollection object containing the pulled output data
+        tmp_dir: temporary directory for intermediate files
+        missing_files: dictionary of files that were expected but not found
+
+    '''
     def __init__(self, grp_d, tmp_dir=None):
 
         self.file_list = []
@@ -555,13 +546,15 @@ class DataGroup:
                 self.nonstatic_traits[key] = None
 
         self.internal_traits = {}
-        self.parent_config = RunConfig(self.static_traits)
+        self.parent_config = RunConfig(self.static_traits, tmp_dir=tmp_dir)
 
         self.output = None
         self.tmp_dir = tmp_dir
         self.missing_files = {}
         # print('Data group tmp dir', self.tmp_dir)
 
+
+    # @TODO revise so checks for existence before returning relevant rows
     def _internal_query(self, dset, query_config=None):
         '''
         query_config: RunConfig object with specific values to filter on
@@ -605,6 +598,20 @@ class DataGroup:
 
 
     def get_files(self, config, output_path, file_name_pattern=None, source='parquet'):
+        '''
+        Retrieve files matching the group traits from the output directory.
+        config: ProjectConfig object with project-level configurations
+        output_path: Path object representing the output directory
+        file_name_pattern: optional string pattern for file names
+        source: string indicating the file format (default 'parquet')
+
+        Populates:
+            self.file_list: list of RunConfig objects for each file in the group
+            self.internal_traits: dictionary of traits determined during file retrieval
+            self.missing_files: dictionary of files that were expected but not found
+
+        '''
+
         grp_path_template = config.get_dynamic_attr("output.{var}.dir_structure", source)  # config.output.grp_dir_structure
         if file_name_pattern is None:
             file_name_pattern = config.output.parquet.file_name#get_dynamic_attr("output.parquet.file_name{var}", "file_name_pattern")  # config.output.file_name_pattern
@@ -682,6 +689,7 @@ class DataGroup:
                             groupconfig_file.output_path = [file_path]
                             print('did not fail for file', file_path, file=sys.stdout, flush=True)
                             file_list.append(groupconfig_file)
+
                             for key in groupconfig_file.traits:
                                 new_values = correct_iterable(getattr(groupconfig_file, key)) if getattr(groupconfig_file, key) is not None else []
                                 for val in new_values:
@@ -714,6 +722,9 @@ class DataGroup:
         self.missing_files.update(missing_files)
 
     def pull_output(self, summary=True, full=False):
+        '''
+        Pull output data from the group files.
+        '''
         tables = []
         print('pulling from datagrp')
 
@@ -734,6 +745,19 @@ class DataGroup:
 #########################################
 
 class Output:
+    '''
+    Output object to manage CCM output data.
+    Methods:
+        get_table(): load the output table from file if not already loaded
+        clear_table(): release memory held by the output table and Arrow pools
+        write_table(tag=''): write the output table to a Parquet file with an optional tag
+    Attributes:
+        _full: pyarrow Table object containing the full output data
+        path: Path object representing the file path of the output data
+        type: string indicating the type of output (e.g., 'delta_rho', 'libsize_aggregated')
+        tmp_dir: Path object representing the temporary directory for intermediate files
+
+    '''
     def __init__(self, full, path=None, outtype=None, tmp_dir=None):
         self._full = full
         self.path = path
@@ -788,15 +812,7 @@ class Output:
 
         if self.path is None:
             unique_scratch_id = uuid.uuid4().hex
-            # if use_case is not None and (isinstance(use_case, str) is True):
-            #     unique_scratch_id = f'{use_case}_{unique_scratch_id}'
-            # else:
             unique_scratch_id = f'{unique_scratch_id}__{tag}'
-
-            # if self.label_stem is not None:
-            #     label_stem = f'{self.label_stem}_'
-            # else:
-            #     label_stem = ''
             scratch_path = self.tmp_dir / f'{unique_scratch_id}.parquet'
             self.path = scratch_path
 
@@ -806,12 +822,30 @@ class Output:
 
 
 class OutputCollection:
+    '''
+    OutputCollection object to manage a collection of CCM output data.
+    Methods:
+        combine_OutputCollections(attr, other_output_collections): combine specified attribute from other OutputCollections
+    Attributes:
+        dyad_home: Path object representing the home directory for dyad analysis
+        tmp_path: Path object representing the temporary directory for intermediate files
+        grp_config: RunConfig object representing the group-level configuration
+        label_stem: string representing the label stem for output files
+        table: Output object containing the full output data
+        libsize_aggregated: Output object containing libsize aggregated data
+        active_stats: Output object containing active statistics data
+        active_full: Output object containing active full data
+        delta_rho_stats: Output object containing delta rho statistics data
+        delta_rho_full: Output object containing delta rho full data
+        relationships: Relationship object representing the relationships between variables
+        r1: RelationshipSide object representing the first side of the relationship
+        r2: RelationshipSide object representing the second side of the relationship
+
+    '''
     def __init__(self, grp_specs=None, in_table=None, outtype=None, tmp_dir=None):
 
         self.dyad_home = None
-        self.tmp_path = Path(str(tmp_dir) if tmp_dir is not None else str(Path.cwd() / 'tmp'))
-        # print('temporary directory for OutputCollection:', self.tmp_path)
-        self.tmp_path.mkdir(parents=True, exist_ok=True)
+
         self.grp_config = None
         self.label_stem = None
 
@@ -829,28 +863,19 @@ class OutputCollection:
         self.r1 = RelationshipSide('r1', relationship=self.relationships) if self.relationships is not None else None
         self.r2 = RelationshipSide('r2', relationship=self.relationships) if self.relationships is not None else None
 
-
-        # self.surr_r1x_count = None
-        # self.surr_r1x_count_outperforming = None
-        # self.surr_r1y_count = None
-        # self.surr_r1y_count_outperforming = None
-        # self.r1_deltarho = None
-        # self.r1_maxlibsize_rho = None
-        # self.r1_lag = None
-        #
-        # self.r2_deltarho = None
-        # self.r2_maxlibsize_rho = None
-        # self.surr_r2x_count = None
-        # self.surr_r2x_count_outperforming = None
-        # self.surr_r2y_count = None
-        # self.surr_r2y_count_outperforming = None
-        # self.r2_lag = None
-
         if isinstance(grp_specs, RunConfig):
             self.grp_config = grp_specs
         elif isinstance(grp_specs, dict):
             iterable_d = {k: correct_iterable(v) for k, v in grp_specs.items()}
             self.grp_config = RunConfig(iterable_d)
+
+        self.tmp_path = tmp_dir if tmp_dir is not None else (self.grp_config.proj_dir / 'tmp' if (self.grp_config is not None and self.grp_config.proj_dir is not None) else Path.cwd() / 'tmp')
+
+        self.tmp_path.mkdir(parents=True, exist_ok=True)
+        print('dyad home?', self.tmp_path.parent.parent)
+        self.dyad_home = None
+        # print('temporary directory for OutputCollection:', self.tmp_path)
+
             # iterable_d = {k: correct_iterable(v) for k, v in grp_specs.__dict__.items()}
 
     # def __init__(self, in_table):
@@ -873,10 +898,7 @@ class OutputCollection:
                     self.combine_OutputCollections(attr, outputcollections)
                 except Exception as e:
                     print(f'Error combining OutputCollections for attribute {attr}: {e}')
-            # for outcoll in in_table:
-            #     tables.append(outcoll.table.table)
-            # in_table = pa.concat_tables(tables)
-            # self.table = Output(in_table)
+
         self.relationships = Relationship(self.grp_config.var_x, self.grp_config.var_y) if self.grp_config is not None else None
 
     def set_relationships(self):
@@ -1004,7 +1026,6 @@ class OutputCollection:
 
         calc_grp_cols = [col for col in full.schema.names if col in self.grp_config.traits and (
                          col not in group_traits_below)]  # if self.grp_config.traits if (col in self.full.schema.names) and (col not in "output_path")]
-        # print('calc_grp_cols', calc_grp_cols)
 
         if 'relation' in full.schema.names:
             if 'relation' not in calc_grp_cols:
@@ -1014,7 +1035,6 @@ class OutputCollection:
 
         stats_tables = []
         full_tables = []
-        # print('unique groups to process:', unique_tbl.num_rows)
         for row_idx in range(unique_tbl.num_rows):
             # try:
             gd = {}
@@ -1041,12 +1061,8 @@ class OutputCollection:
             if stats_out is True and s_tbl is not None and s_tbl.num_rows > 0:
                 stats_tables.append(s_tbl)
             if full_out is True and f_tbl is not None and f_tbl.num_rows > 0:
-                # print('appending full table with', f_tbl.num_rows, 'rows', 'for group', gd)
                 full_tables.append(f_tbl)
-            # except Exception as e:
-            #     print(f"Error processing group {row_idx}: {e}")
-            #     continue
-        # print('stats out:', stats_out, 'full out:', full_out)
+
         if stats_out is True:
             out_stats = pa.concat_tables(stats_tables) if stats_tables else None
             self.delta_rho_stats = Output(out_stats, outtype='delta_rho_stats', tmp_dir=self.tmp_path)#, use_case='delta_rho_stats')
@@ -1065,9 +1081,8 @@ class OutputCollection:
         if group_table.num_rows == 0:
             return self
 
-        group_traits_below = self.grp_config.trait_hierarchy(full, 'LibSize', level="below", threshold=0.9)
+        calc_grp_cols = ['E', 'tau', 'Tp', 'lag', 'knn', 'surr_var', 'surr_num', 'x_id', 'x_age_model_ind', 'x_var', 'y_id', 'y_age_model_ind', 'y_var', 'LibSize', 'ind_i', 'relation', 'forcing', 'responding']
 
-        calc_grp_cols = [col for col in full.schema.names if col not in group_traits_below]# if self.grp_config.traits if (col in self.full.schema.names) and (col not in "output_path")]
         if "LibSize" in full.schema.names:
             if "LibSize" not in calc_grp_cols:
                 calc_grp_cols.append("LibSize")
@@ -1076,7 +1091,10 @@ class OutputCollection:
                 calc_grp_cols.append('relation')
 
         aggregated_cols = [col for col in full.schema.names if (col not in calc_grp_cols) and ('id' not in col) and ('ind' not in col) and (full[col].type in [pa.float32(), pa.float64(), pa.int32(), pa.int64()])]
+        print('aggregated cols', aggregated_cols)
         grouped_aggregated_table = pa.TableGroupBy(full, calc_grp_cols).aggregate([(col, "mean") for col in aggregated_cols])
+        new_names = [col.replace('_mean', '')  for col in grouped_aggregated_table.schema.names]
+        grouped_aggregated_table = grouped_aggregated_table.rename_columns(new_names)
         self.libsize_aggregated = Output(grouped_aggregated_table, outtype='libsize_aggregated', tmp_dir=self.tmp_path)#, use_case='libsize_aggregated')
         return self
 
@@ -1084,35 +1102,34 @@ class OutputCollection:
         """Release memory held by all tables and Arrow pools."""
         if hasattr(self, "table") and self.table is not None:
             self.table.clear_table()
-            # self.table = None
+
         if hasattr(self, "libsize_aggregated") and self.libsize_aggregated is not None:
             self.libsize_aggregated.clear_table()
-            # self.libsize_aggregated = None
+
         if hasattr(self, "active_stats") and self.active_stats is not None:
             self.active_stats.clear_table()
-            # self.active_stats = None
+
         if hasattr(self, "active_full") and self.active_full is not None:
             self.active_full.clear_table()
-            # self.active_full = None
+
         if hasattr(self, "delta_rho_stats") and self.delta_rho_stats is not None:
             self.delta_rho_stats.clear_table()
-            # self.delta_rho_stats = None
+
         if hasattr(self, "delta_rho_full") and self.delta_rho_full is not None:
             self.delta_rho_full.clear_table()
-            # self.delta_rho_full = None
+
         gc.collect()
         pa.default_memory_pool().release_unused()
 
     def get_table_paths(self):
+        '''
+        Retrieve file paths for all stored tables in the OutputCollection.
+        '''
         paths = {}
         if hasattr(self, "table") and self.table is not None and self.table.path is not None:
             paths['table'] = self.table.path
         if hasattr(self, "libsize_aggregated") and self.libsize_aggregated is not None and self.libsize_aggregated.path is not None:
             paths['libsize_aggregated'] = self.libsize_aggregated.path
-        # if hasattr(self, "active_stats") and self.active_stats is not None and self.active_stats.path is not None:
-        #     paths['active_stats'] = self.active_stats.path
-        # if hasattr(self, "active_full") and self.active_full is not None and self.active_full.path is not None:
-        #     paths['active_full'] = self.active_full.path
         if hasattr(self, "delta_rho_stats") and self.delta_rho_stats is not None and self.delta_rho_stats.path is not None:
             paths['delta_rho_stats'] = self.delta_rho_stats.path
         if hasattr(self, "delta_rho_full") and self.delta_rho_full is not None and self.delta_rho_full.path is not None:
@@ -1120,6 +1137,15 @@ class OutputCollection:
         return paths
 
     def migrate_path(self, new_dyad_home=None, tmp_home=None):
+        '''
+        Migrate all stored table paths to a new dyad home and temporary directory.
+        Because the OutputCollection operates by reading in and clearing tables, paths must be updated when the dyad home or temporary directory changes.
+
+        Assumptions:
+        - new_dyad_home is the path to parent of the dyad directory (so the directory housing, for example, Erb22daGMST_Wu18TSI)
+        - tmp_home is the name of the dyad directory (e.g. Erb22daGMST_Wu18TSI)
+
+        '''
         if new_dyad_home is None:
             new_dyad_home = self.dyad_home
         if new_dyad_home is None:
