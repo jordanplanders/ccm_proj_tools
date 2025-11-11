@@ -1,10 +1,8 @@
 import time
 import pyEDM as pe
-
+import sys
 from utils.arg_parser import get_parser
 from utils.config_parser import load_config
-# from utils.data_access import pull_raw_data
-# from utils.run_tools import decide_file_handling
 
 from data_obj.data_objects import *
 from data_obj.data_var import *
@@ -52,8 +50,6 @@ def decide_file_handling(args, file_exists: bool, modify_datetime=None) -> tuple
     # 3) otherwise → run & overwrite
     return run_continue, overwrite
 
-
-
 def print_log_line(script, function, log_line, log_type='info'):
     if log_type == 'error':
         file_pointer = sys.stderr
@@ -64,8 +60,21 @@ def print_log_line(script, function, log_line, log_type='info'):
     return time.time()
 
 def run_experiment(arg_tuple):
-    ccm_obj, cpu_count, self_predict, time_offset = arg_tuple
+    '''
+    Run EDM CCM experiment based on CCMConfig object
+    Parameters:
+        arg_tuple: (ccm_obj, cpu_count, self_predict, time_offset)
+            ccm_obj: CCMConfig object
+            cpu_count: number of CPUs to use
+            self_predict: boolean, whether to use self prediction
+            time_offset: integer, offset to add to run_id
+    Returns:
+        (ccm_out_df, df_path)
 
+
+    '''
+
+    ccm_obj, cpu_count, self_predict, time_offset = arg_tuple
 
     time_var = ccm_obj.time_var
     run_id = int(time.time() * 1000) + time_offset
@@ -73,7 +82,6 @@ def run_experiment(arg_tuple):
     df_path = ccm_obj.file_path#output_dir / df_csv_name
     start_time = print_log_line('run_edm_carc_pool2_config_toObj', 'run_experiment',
                                      f'{df_path} exists: {df_path.exists()}, starting start_ind {start_ind}, pset_id {ccm_obj.pset_id}, col_var_id {ccm_obj.col_var_id}, target_var_id {ccm_obj.target_var_id}, E {ccm_obj.E}, tau {ccm_obj.tau}, lag {ccm_obj.lag}, knn {ccm_obj.knn}, Tp {ccm_obj.Tp}, sample {ccm_obj.sample}, weighted {ccm_obj.weighted}, train_ind_i {ccm_obj.train_ind_i}, surr_var {ccm_obj.surr_var}, surr_num {ccm_obj.surr_num}', 'info')
-    #
 
     try:
         pred_num = config.ccm_config.pred_num
@@ -81,8 +89,7 @@ def run_experiment(arg_tuple):
         pred_num = None
 
     # note: at some point "embedded=False" will not always be correct
-    # cpu_allocation = os.cpu_count() if os.cpu_count() is not None and os.cpu_count()<17  else 16
-    # print('cpu_count', cpu_count, file=sys.stdout, flush=True)
+    # cpu_count = 1 for HPC runs where resources are allocated less flexibly
     ccm_out = pe.CCM(dataFrame=ccm_obj.df,
                      E=ccm_obj.E, Tp=ccm_obj.Tp, tau=-ccm_obj.tau,
                      exclusionRadius=ccm_obj.exclusion_radius,
@@ -107,7 +114,6 @@ def run_experiment(arg_tuple):
     ccm_out_df['run_id'] = run_id
     ccm_out_df['pset_id'] = ccm_obj.pset_id
 
-    # ccm_out_df.to_csv(df_path)
     print('!\tfinish', 'start index:', start_ind, ccm_obj.pset_id, f'time elapsed: {time.time() - start_time}',
           ccm_obj.col_var_id, ccm_obj.target_var_id,
           'E, tau, lag= ', ccm_obj.E, ccm_obj.tau, ccm_obj.lag,
@@ -167,8 +173,6 @@ if __name__ == '__main__':
         print('parameters are required', file=sys.stderr, flush=True)
         sys.exit(0)
 
-
-    # # alert!!!!
     flags = []
     if args.flags is not None:
         flags += args.flags
@@ -178,6 +182,7 @@ if __name__ == '__main__':
     else:
         cpu_count = 4
 
+    #
     num_inds = 10
     if args.inds is not None:
         start_ind = int(args.inds[-1])
