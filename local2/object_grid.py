@@ -16,8 +16,31 @@ from data_obj.data_objects import *#DataGroup, GroupOutput
 from data_obj.plotting_objects import *
 
 
-def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config):
+def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config, existing_output=None, calc_delta_rho_table=True,
+                   aggregate_libsize_table=True):
+    '''
+    Process a single (E, tau) configuration and return a GridCell object containing the results.
+    Parameters:
+        - grp_info: dict, containing 'E' and 'tau' keys for the configuration to process.
+        - E_i: int, index of the embedding dimension. (this is liable to change in actual usage)
+        - tau_i: int, index of the time delay. (this is liable to change in actual usage)
+        - tmp_dir: Path, cache directory for intermediate files.
+        - output_location: Path, directory where output files are stored.
+        - config: configuration object containing settings for data processing.
+        - existing_output: GroupOutput object, optional existing output to update.
+        - calc_delta_rho_table: bool, whether to calculate delta rho statistics.
+        - aggregate_libsize_table: bool, whether to aggregate library size statistics.
+    Returns:
+        - GridCell object containing the processed results for the given (E, tau) configuration.
+
+    Uses:
+        - DataGroup: to manage and retrieve data files for the given configuration.
+        - OutputCollection: to aggregate and manage output data.
+        - GridCell: to encapsulate the results for the grid cell corresponding to (E, tau).
+    '''
+
     print(f'Processing E={grp_info["E"]}, tau={grp_info["tau"]}', output_location / 'parquet', file=sys.stdout, flush=True)
+
     test_grp = DataGroup(grp_info, tmp_dir=tmp_dir)
     test_grp.get_files(config, output_location / 'parquet',
                        file_name_pattern='E{E}_tau{tau}_lag{lag}', source='parquet')
@@ -34,13 +57,42 @@ def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config):
             name = groupconfig_file.output_path[0].name
         except:
             name = groupconfig_file.output_path
+
         print(f'\t1 processing file {ij + 1}/{len(test_grp.file_list)}: {name}', file=sys.stdout, flush=True)
-        output_col = groupconfig_file.pull_output(to_table=False).calc_delta_rho().aggregate_libsize()
+        output_col = groupconfig_file.pull_output(to_table=False)
+
+        if calc_delta_rho_table is True:
+            output_col = output_col.calc_delta_rho()
+
+
+        if aggregate_libsize_table is True:
+            output_col = output_col.aggregate_libsize()
+
         print(f'\tcalculated delta rho and libsize aggregation {name}', file=sys.stdout, flush=True)
 
         output_collections.append(output_col)
 
     new_output_col = OutputCollection(in_table=output_collections, grp_specs=test_grp.get_group_config(), tmp_dir=tmp_dir)
+    if aggregate_libsize_table is True:
+        libsize_aggregated_path = existing_output.libsize_aggregated.path if existing_output is not None else None
+        if libsize_aggregated_path is not None:
+            new_output_col.libsize_aggregated.path = libsize_aggregated_path
+
+    if calc_delta_rho_table is True:
+        delta_rho_path = existing_output.delta_rho_stats.path if existing_output is not None else None
+        if delta_rho_path is not None:
+            new_output_col.delta_rho_stats.path = delta_rho_path
+
+
+    if new_output_col.libsize_aggregated is None:
+        if existing_output is not None:
+            new_output_col.libsize_aggregated = existing_output.libsize_aggregated
+            new_output_col.libsize_aggregated.get_table()
+
+    if new_output_col.delta_rho_stats is None:
+        if existing_output is not None:
+            new_output_col.delta_rho_stats = existing_output.delta_rho_stats
+            new_output_col.delta_rho_stats.get_table()
 
     try:
         gb = new_output_col.libsize_aggregated.surrogate.group_by(["surr_var"]).aggregate([("surr_num", "count_distinct")])
@@ -72,7 +124,18 @@ def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config):
 
 
 if __name__ == "__main__":
-
+    ''' 
+    Command line interface for processing (E, tau) configurations and generating object grid files.
+    Uses argparse to parse command line arguments for project name, file names, temporary directory, indices, and flags.
+    1. Parses command line arguments for project name, object grid file name, group file name, temporary directory, indices, and flags.
+    2. Loads project configuration from YAML file.
+    3. Reads e_tau_grps_df from specified CSV file.
+    4. For each specified (E, tau) configuration, processes the configuration using process_config function.
+    5. Saves the resulting object grid to a joblib file in the temporary directory.
+    6. Skips processing for configurations that have already been processed unless specific flags are set.
+    7. Outputs progress and status messages to stdout.
+    
+    '''
     parser = get_parser()
     args = parser.parse_args()
 
@@ -97,6 +160,14 @@ if __name__ == "__main__":
     else:
         ind = int(sys.argv[-1])
 
+    calc_delta_rho_table = False
+    aggregate_libsize_table = False
+    if args.flags is not None:
+        if 'calc_delta_rho' in args.flags:
+            calc_delta_rho_table = True
+        if 'aggregate_libsize' in args.flags:
+            aggregate_libsize_table = True
+
     calc_location = set_calc_path(None, proj_dir, config, '')
     print(f'Calculation location: {calc_location}', file=sys.stdout, flush=True)
     print(f'Read e_tau_grps_df from {group_file_name}.', file=sys.stdout, flush=True)
@@ -109,7 +180,6 @@ if __name__ == "__main__":
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     # this is hardcoded but should be released and left to the construction of the e_tau_grps_df
-    E_vals = [4, 5, 6, 7, 8, 9]
     E_vals = [4, 5, 6, 7, 8, 9]
     tau_vals = [1, 2, 3, 4, 5, 6, 7]
     comb_df = e_tau_grps_df[e_tau_grps_df['E'].isin(E_vals) & e_tau_grps_df['tau'].isin(tau_vals)].copy()
@@ -128,14 +198,58 @@ if __name__ == "__main__":
     except:
         object_grid = {}
 
+    # Process the (E, tau) configuration if not already processed
     if (E, tau) not in object_grid.keys():
-        object_grid[(E, tau)] = process_config(row, E_is[E], tau_is[tau], tmp_dir, output_location, config)
-        joblib_cloud_atomic_dump(object_grid, tmp_dir/obj_grid_file_name, compress=3,
-                           protocol=5)
+        print('regardless of flags, going the dual calculations', file=sys.stdout, flush=True)
+        object_grid[(E, tau)] = process_config(row, E_is[E], tau_is[tau], tmp_dir, output_location, config, calc_delta_rho_table=True,
+                                               aggregate_libsize_table=True)
+
+        joblib_cloud_atomic_dump(object_grid, tmp_dir / obj_grid_file_name, compress=3,
+                                 protocol=5)
         del object_grid
         gc.collect()
         print(f"Processed and saved E={E}, tau={tau} to {tmp_dir}.", file=sys.stdout, flush=True)
     else:
-        print(f"Skipping E={E}, tau={tau} because already processed.", file=sys.stdout, flush=True)
+        if object_grid[(E, tau)].output is None:
+            calc_delta_rho_table = True
+            aggregate_libsize_table = True
+        else:
+            if object_grid[(E, tau)].output.delta_rho_stats.path is None:
+                calc_delta_rho_table = True
+            if object_grid[(E, tau)].output.libsize_aggregated.path is None:
+                aggregate_libsize_table = True
+
+        if (calc_delta_rho_table is True) or (aggregate_libsize_table is True):
+            print('calculations have been explicitly set: calc_delta_rho_table', calc_delta_rho_table,
+                  '; aggregate_libsize:', aggregate_libsize_table, file=sys.stdout, flush=True)
+
+            object_grid[(E, tau)] = process_config(row, E_is[E], tau_is[tau], tmp_dir, output_location, config, existing_output=object_grid[(E, tau)].output,
+                                                       calc_delta_rho_table=calc_delta_rho_table,
+                                                       aggregate_libsize_table=aggregate_libsize_table)
+
+            joblib_cloud_atomic_dump(object_grid, tmp_dir/obj_grid_file_name, compress=3,
+                                   protocol=5)
+            del object_grid
+            gc.collect()
+            print(f"Processed and saved E={E}, tau={tau} to {tmp_dir}.", file=sys.stdout, flush=True)
+        else:
+            print(f"Skipping E={E}, tau={tau} because already processed.", file=sys.stdout, flush=True)
+
+    # Process if either calculation flag is set
+    # elif (calc_delta_rho_table is True) or (aggregate_libsize_table is True):
+    #     print('calculations have been explicitly set: calc_delta_rho_table', calc_delta_rho_table,
+    #           '; aggregate_libsize:', aggregate_libsize_table, file=sys.stdout, flush=True)
+    #
+    #     object_grid[(E, tau)] = process_config(row, E_is[E], tau_is[tau], tmp_dir, output_location, config, existing_output=object_grid[(E, tau)].output,
+    #                                            calc_delta_rho_table=calc_delta_rho_table,
+    #                                            aggregate_libsize_table=aggregate_libsize_table)
+    #
+    #     joblib_cloud_atomic_dump(object_grid, tmp_dir/obj_grid_file_name, compress=3,
+    #                        protocol=5)
+    #     del object_grid
+    #     gc.collect()
+    #     print(f"Processed and saved E={E}, tau={tau} to {tmp_dir}.", file=sys.stdout, flush=True)
+    # else:
+    #     print(f"Skipping E={E}, tau={tau} because already processed.", file=sys.stdout, flush=True)
 
 
