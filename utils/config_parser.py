@@ -44,16 +44,6 @@ class ProjectConfig:
         else:
             raise TypeError(f"{list_name} is not a list.")
 
-    # Recursive function to convert the class back to a dictionary (for saving to YAML)
-    # def to_dict(self):
-    #     result = {}
-    #     for key, value in self.__dict__.items():
-    #         if isinstance(value, ProjectConfig):
-    #             result[key] = value.to_dict()
-    #         else:
-    #             result[key] = value
-    #     return result
-
     def to_dict(self):
         result = {}
         for key, value in self.__dict__.items():
@@ -98,18 +88,13 @@ class ProjectConfig:
 
         return obj
 
-# Function to load the YAML file and instantiate the class
-# def load_config(yaml_file):
-#     with open(yaml_file, 'r') as file:
-#         config_data = yaml.safe_load(file)
-#     return ProjectConfig(config_data, file_path=yaml_file)
-
 def _load_yaml(path: Path) -> dict:
     with open(path, "r") as f:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
         raise ValueError(f"Top-level YAML at {path} must be a mapping.")
     return data
+
 
 def _find_var_file(var_id: str, base_dir: Path) -> Path:
     for ext in (".yaml", ".yml"):
@@ -118,9 +103,30 @@ def _find_var_file(var_id: str, base_dir: Path) -> Path:
             return p
     raise FileNotFoundError(f"Variable file not found for '{var_id}' in {base_dir}.")
 
+
 def load_config(yaml_file, var_dir_name: str = "data_var_configs"):
+    ''''
+    Load project configuration from a YAML file, including data variable definitions.
+    Parameters:
+        - yaml_file: Path to the main project YAML configuration file.
+        - var_dir_name: Directory name where data variable YAML files are stored.
+    Returns:
+        - ProjectConfig instance with loaded configuration.
+
+    Notes:
+        - Data variable YAML files are expected to be in the specified var_dir_name directory,
+            located relative to the main YAML file.
+        - If a palette.yaml file exists in a parent var_dir_name directory, its contents
+            will be merged into the main palette dictionary.
+    '''
     yaml_path = Path(yaml_file).resolve()
     cfg = _load_yaml(yaml_path)
+
+    palette_dict = cfg.pop("pal", {})
+    pal_dir = (yaml_path.parent.parent / var_dir_name).resolve()
+    if (pal_dir / 'palette.yaml').exists():
+        palette_dict = _load_yaml(pal_dir / 'palette.yaml')['pal']
+
 
     dv = cfg.pop("data_vars", None)
     if dv:
@@ -141,8 +147,12 @@ def load_config(yaml_file, var_dir_name: str = "data_var_configs"):
             if var_id in cfg:
                 raise ValueError(f"Top-level key '{var_id}' already exists in main config.")
             cfg[var_id] = var_dict
+            if 'color' in var_dict:
+                palette_dict[var_id] = var_dict['color']
 
         cfg["_data_vars_loaded"] = var_ids
+
+    cfg['pal'] = palette_dict
 
     return ProjectConfig(cfg, file_path=str(yaml_path))
 
@@ -194,128 +204,5 @@ def add_var(config, var_type, var_id, var_meta):
 
     # Flat vars mapping
     config.setdefault("vars", {})[var_type] = var_block["var"]
-    # # Surrogate vars
-    # config.setdefault("surr_vars", [])
-    # if var_block["var"] not in config["surr_vars"]:
-    #     config["surr_vars"].append(var_block["var"])
 
 
-def new_config_from_template(
-    template_path,
-    output_path,
-    *,
-    project_name,
-    data_csv_name,
-    delta_t,
-    time_unit,
-    target_relation,
-    col_grp,
-    target_grp,
-    vars_to_add  # list of tuples: (var_type, var_id, var_meta)
-):
-    """
-    Create a new config from template, setting project fields, group metadata, and adding variables.
-
-    - col_grp / target_grp supply group-level metadata (var, alias, long_label, var_label).
-    - vars_to_add must include all series entries with explicit var_ids.
-    """
-    # Load the YAML template
-    with open(template_path, 'r') as f:
-        config = yaml.safe_load(f)
-
-    # Core project settings
-    config['proj_name'] = project_name
-    config['target_relation'] = target_relation
-    config.setdefault('raw_data', {})
-    config['raw_data'].update({
-        'data_csv': data_csv_name,
-        'delta_t': delta_t,
-        'time_unit': time_unit
-    })
-
-    # Flat mapping for primary groups (not var_ids)
-    config.setdefault('vars', {})
-    config['vars']['col'] = col_grp['var']
-    config['vars']['target'] = target_grp['var']
-
-    # Set up group metadata without treating as members
-    config['col'] = {
-        'var': col_grp['var'],
-        'alias': col_grp.get('alias', col_grp['var']),
-        'long_label': col_grp.get('long_label', None),
-        'ids': []
-    }
-    config['target'] = {
-        'var': target_grp['var'],
-        'alias': target_grp.get('alias', target_grp['var']),
-        'long_label': target_grp.get('long_label', target_grp.get('var_label')),
-        'ids': []
-    }
-
-    # Initialize id lists
-    config['col_var_ids'] = []
-    config['target_var_ids'] = []
-
-    # Add each variable entry using add_var (now only actual var_ids)
-    for var_type, var_id, var_meta in vars_to_add:
-        add_var(config, var_type, var_id, var_meta)
-
-    # Expose single-var keys
-    config['col_var'] = config['col']['var']
-    config['target_var'] = config['target']['var']
-
-    # Surrogate vars
-    config.setdefault("surr_vars", [])
-    config["surr_vars"] = [config['col']['var'], config['target']['var']]
-
-    # Palette remapping
-    old_pal = config.pop('pal', {})
-    new_pal = {}
-    # Rename generic entries
-    for key, val in old_pal.items():
-        new_key = key.replace('target_var', config['target_var']).replace('col_var', config['col_var'])
-        new_pal[new_key] = val
-
-    # Map short keys to specific ids
-    for idx, vid in enumerate(config['target_var_ids'], start=1):
-        short_key = f'target_short_var{idx}'
-        if short_key in old_pal:
-            new_pal[vid] = old_pal[short_key]
-            if short_key in new_pal:
-                new_pal.pop(short_key)
-
-    for idx, vid in enumerate(config['col_var_ids'], start=1):
-        short_key = f'col_short_var{idx}'
-        if short_key in old_pal:
-            new_pal[vid] = old_pal[short_key]
-            if short_key in new_pal:
-                new_pal.pop(short_key)
-
-    config['pal'] = new_pal
-
-    config.pop('col_short_var1', None)
-    config.pop('target_short_var1', None)
-
-    # Write out the new YAML
-    out_path = Path(output_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, 'w') as f:
-        yaml.dump(config, f, sort_keys=False)
-
-    return config
-
-
-
-# Usage example:
-if __name__ == "__main__":
-    config = load_config("proj_config.yaml")
-    print(config, file=sys.stdout, flush=True)  # Print the whole configuration as a class
-
-    # Add a new attribute
-    config.add_attribute("new_attribute", "new_value")
-
-    # Add a new item to a list (make sure it's a valid list name from the YAML file)
-    config.add_to_list("col_var_ids", "new_id")
-
-    # Save the changes back to the file
-    config.save_config()
