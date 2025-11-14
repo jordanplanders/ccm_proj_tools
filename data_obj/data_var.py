@@ -52,18 +52,18 @@ class DataVarConfig:
 
     def populate(self, config, proj_dir):
         self.proj_dir = proj_dir
-        try:
-            var_yaml = config.get_dynamic_attr("data_vars.{var}", self.var_id)
-            var_info = load_config(proj_dir / 'var_configs'/f'{var_yaml}.yaml')
-
-            # load variable-specific settings from config
-            # self.load_from_var_yaml(var_yaml, proj_dir)
-            var_info = var_yaml.get(self.var_id, None) if var_yaml is not None else None
-        except:
-            print(f'reading var yaml for {self.var_id} failed, trying config')
-            var_info = config.get_dynamic_attr("{var}", self.var_id)
-            var_info = var_info.to_dict()
-            # self.load_from_config(config, proj_dir)
+        # try:
+        #     var_yaml = config.get_dynamic_attr("data_vars.{var}", self.var_id)
+        #     var_info = load_config(proj_dir / 'var_configs'/f'{var_yaml}.yaml')
+        #
+        #     # load variable-specific settings from config
+        #     # self.load_from_var_yaml(var_yaml, proj_dir)
+        #     var_info = var_yaml.get(self.var_id, None) if var_yaml is not None else None
+        # except:
+        # print(f'reading var yaml for {self.var_id} failed, trying config')
+        var_info = config.get_dynamic_attr("{var}", self.var_id)
+        var_info = var_info.to_dict()
+        # self.load_from_config(config, proj_dir)
 
         real_ts_d = var_info.pop('real_data_ts', None)
         # real_csv_stem
