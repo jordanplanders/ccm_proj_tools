@@ -56,6 +56,11 @@ def check_palette_syntax(palette, table):
     relations = pc.unique(table[relation_col]).to_pylist()
     rel_word = 'causes' if any('cause' in r for r in relations) else 'influences'
     palette_rel_word = 'causes' if any('cause' in r for r in palette.keys()) else 'influences'
+    # new_palette = {}
+    # for k, v in palette.items():
+    #     new_key = k.replace(palette_rel_word, rel_word)
+    #     print(f"Replacing palette key '{k}' with '{new_key}'")
+    #     new_palette[new_key] = v
     palette = {k.replace(palette_rel_word, rel_word): v for k, v in palette.items()}
     return palette
 
@@ -321,7 +326,7 @@ class GridPlot:
             if add_hline>_ylims[0] and add_hline<_ylims[1]:
                 ax.axhline(add_hline, color='gray', linestyle='--', linewidth=1)
 
-    def tidy_rows(self, add_hline=0, ylim_by_row=False, supylabel_offset=0.04):
+    def tidy_rows(self, add_hline=0, ylim_by_row=False, supylabel_offset=0.04, keep_titles=False):
 
         y_tick_list = []
         if ylim_by_row is False:
@@ -411,9 +416,11 @@ class GridPlot:
                     ax.spines['bottom'].set_visible(False)
 
                 if ik >0:
-                    ax.set_title('')
+                    if keep_titles is False:
+                        ax.set_title('')
                 else:
-                    ax.set_title(ax.get_title(), fontsize='large', fontweight='bold', pad=15)
+                    if keep_titles is False:
+                        ax.set_title(ax.get_title(), fontsize='large', fontweight='bold', pad=15)
 
                 if len(self.xlims) == 2:
                     if ((len(ax.lines) == 0) and (len(ax.collections) == 0)) is False:
@@ -1164,6 +1171,7 @@ class ResultsGrid(BasePlot):
             [self.y_var, self.x_var, self.hue_var, 'surr_ry_outperforming_frac', 'surr_rx_outperforming_frac',
              # 'perc_pos_r','perc_pos_r_top', 'deltarho_r_top','perc_pos_r_final']
              ]].copy()
+        dyad_df[self.hue_var] = dyad_df.apply(lambda row: 0 if (row['surr_ry_outperforming_frac'] is None) or (row['surr_rx_outperforming_frac'] is None) else row[self.hue_var], axis=1)
         # dyad_df = dyad_df.drop_duplicates(['tau', 'E', hue_var_fill, 'TSI_p_less__maxlibsize_rho', 'temp_p_less__maxlibsize_rho'])
         dyad_df[self.hue_var].fillna(-1, inplace=True)
         return dyad_df
