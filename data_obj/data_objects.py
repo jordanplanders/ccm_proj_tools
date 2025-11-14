@@ -917,15 +917,24 @@ class OutputCollection:
              tables.append(getattr(other_output_collection, attr))
         print(len(tables), 'tables to combine for', attr)
         tables = [tbl for tbl in tables if tbl is not None]
+        col_types = {col: tables[0]._full.schema.field(col).type for col in tables[0]._full.schema.names}
 
         tables_full = []
         outtypes = []
         for tbl in tables:
             if (isinstance(tbl, Output) is True) and (tbl.table is not None) and (isinstance(tbl.table, pa.Table) is True):
+                for col in tbl._full.schema.names:
+                    if tbl._full.schema.field(col).type != col_types[col]:
+                        tbl._full = tbl._full.set_column(
+                            tbl._full.schema.get_field_index(col), col, tbl._full[col].cast(col_types[col]))
                 tables_full.append(tbl.table)
                 outtypes.append(tbl.type)
                 tbl.clear_table()
             elif isinstance(tbl, pa.Table) is True:
+                for col in tbl.schema.names:
+                    if tbl.schema.field(col).type != col_types[col]:
+                        tbl = tbl.set_column(
+                            tbl.schema.get_field_index(col), col, tbl[col].cast(col_types[col]))
                 tables_full.append(tbl)
 
         outtypes = list(set(outtypes))
