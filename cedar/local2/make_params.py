@@ -6,16 +6,10 @@ import sys
 from pathlib import Path
 import os
 import re
-import yaml
+
 proj_dir = Path(os.getcwd()).resolve().parents[0]
 sys.path.append(str(proj_dir/'ccm_proj_tools'))
-from utils.arg_parser import get_parser  # Importing the argument parser from arg_parser.py
-import importlib.util
 import pandas as pd
-from utils.config_parser import load_config
-from utils.location_helpers import *
-
-
 
 # Define a dictionary of parameters to be used for generating combinations later
 parameters_d = {

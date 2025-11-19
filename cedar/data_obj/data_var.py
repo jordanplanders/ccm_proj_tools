@@ -3,8 +3,7 @@ import pandas as pd
 import numpy as np
 import pyleoclim as pyleo
 
-from utils.data_access import choose_data_source, check_csv, remove_extra_index
-from utils.config_parser import load_config
+from cedar.utils.data_access import choose_data_source, check_csv, remove_extra_index
 
 
 class DataVarConfig:

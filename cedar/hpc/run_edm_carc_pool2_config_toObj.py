@@ -1,12 +1,10 @@
 import time
 import pyEDM as pe
 import sys
-from utils.arg_parser import get_parser
-from utils.config_parser import load_config
+from cedar.utils.arg_parser import get_parser
+from cedar.utils.config_parser import load_config
 
-from data_obj.data_objects import *
-from data_obj.data_var import *
-from utils import process_output as po
+from cedar.utils import process_output as po
 
 
 def decide_file_handling(args, file_exists: bool, modify_datetime=None) -> tuple[bool, bool]:
