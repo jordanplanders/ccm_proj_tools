@@ -24,7 +24,8 @@ dependencies = [
     "joblib",
 
     # pyleoclim fork
-    "pyleoclim @ git+https://github.com/LinkedEarth/Pyleoclim_util.git",
+#    "pyleoclim @ git+https://github.com/LinkedEarth/Pyleoclim_util.git",
+    "pyleoclim",
 
     # pyEDM fork pinned to specific commit (branch jpl)
     "pyEDM @ git+https://github.com/jordanplanders/pyEDM.git@5defad56bab1d673a38f6b375a78d7319ac1c8e1#egg=pyEDM"
