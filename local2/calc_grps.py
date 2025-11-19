@@ -40,7 +40,7 @@ def main():
     output_dir = set_output_path(args, calc_location, config)
 
     query_keys = config.calc_grps.query_keys
-    parameter_dir = proj_dir / loc_config.parameters.name
+    parameter_dir = proj_dir / loc_config.parameter_dir
 
     # Load parameters
     if args.parameters not in (None, ''):
@@ -64,7 +64,7 @@ def main():
     grouped = params_df[query_keys].drop_duplicates(ignore_index=True)
 
     # Paths to input/output CSVs
-    grp_csv_base = config.csvs.calc_grp
+    grp_csv_base = config.csvs.calc_grps
     grp_csv_path = calc_location / f'{grp_csv_base}.csv'
 
     # Apply timestamp suffix if running in test mode
