@@ -302,16 +302,11 @@ def package_calc_grp_results_to_parquet(
 
         # check existing parquet to see what has been recorded
         if write_path_file_valid is True:
-            # do = DataGroup(grp_d)
-            # try:
             existing_parquet_table = ds.dataset(str(write_path), format="parquet").to_table()
             print('\texisting_parquet_table rows:', existing_parquet_table.num_rows,existing_parquet_table.schema.names, file=sys.stdout, flush=True)
             recorded_parquet = drop_duplicates(existing_parquet_table, on=['E', 'tau', 'lag', 'Tp', 'knn', 'surr_var', 'surr_num','x_id', 'y_id'] )
             recorded_parquet_df = recorded_parquet.to_pandas()
             recorded_parquet_df = recorded_parquet_df.rename(columns = {'x_id':'col_var_id', 'y_id':'target_var_id'})
-            #
-            # except:
-            #     write_path_file_valid = False
 
         # Process each CSV
         time_start = time.time()
@@ -351,23 +346,6 @@ def package_calc_grp_results_to_parquet(
                      'target_var_id': target_var_id}  # ,'col_var': col_var, 'target_var': target_var,'pset_id': pset_id,'x_age_model_ind': x_age_model_ind,'y_age_model_ind': y_age_model_ind}
             skip = False
             print('\tgrp_d for existence check:', grp_d, file=sys.stdout, flush=True)
-
-            # check if already exists in parquet
-            # if write_path_file_valid is True:
-            #     exists = check_existence_in_table(recorded_parquet_df, grp_d)
-            #     # mask = pd.Series([True] * len(recorded_parquet_df))
-            #     # for k, v in grp_d.items():
-            #     #     mask &= (recorded_parquet_df[k] == v)
-            #     #
-            #     # exists = mask.any()
-            #     if exists == True:
-            #         # print(f"\ts\t1 Skipping {fname} because already in {Path(write_path).name}", file=sys.stdout, flush=True)
-            #         skip = True
-            #
-            # if skip == True:
-            #     print(f"\ts\tSkipping {fname} because already in {Path(write_path).name}", file=sys.stdout, flush=True)
-            #     sub_existing.append(fpath)
-            #     continue
 
             print(f"\tr\tReading {fpath}", file=sys.stdout, flush=True)
             try:
