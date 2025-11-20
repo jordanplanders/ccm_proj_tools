@@ -2,8 +2,8 @@ import pandas as pd
 
 pd.option_context('mode.use_inf_as_na', True)
 
-from cedar.utils.config_parser import load_config
-from cedar.utils.arg_parser import get_parser
+from utils.config_parser import load_config
+from utils.arg_parser import get_parser
 
 
 def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config, existing_output=None, calc_delta_rho_table=True,

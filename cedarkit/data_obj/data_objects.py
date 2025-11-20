@@ -12,17 +12,21 @@ from collections import defaultdict
 import uuid
 # from pyarrow import table
 import os
+import gc
 
 import pyarrow as pa
 import pyarrow.compute as pc
+# from data_obj.data_var import *
+try:
+    from cedarkit.data_obj.data_var import *
+    from cedarkit.data_obj.relationship_obj import *
 
-if 'lplander' in os.getcwd():
-    stem = Path('/project/julieneg_1001/lplander')
-else:
-    stem = Path('/Users/jlanders/PycharmProjects')
-
-CODE_DIR = str(stem / 'ccm_proj_tools')
-sys.path.append(CODE_DIR)
+    from cedarkit.utils.location_helpers import *
+except ImportError:
+    # Fallback: imports when running as a package
+    from data_obj.data_var import *
+    from data_obj.relationship_obj import *
+    from utils.location_helpers import *
 
 # dump
 import os, tempfile, pickle, joblib, cloudpickle
@@ -347,7 +351,7 @@ class RunConfig:
 
         self.pset_id=None
         self.train_ind_i = None
-        self.train_ind_f = None
+        self.train_ind_f = -1
 
         self.populate(grp_d)
         self.tmp_dir = tmp_dir
@@ -367,6 +371,9 @@ class RunConfig:
 
     def copy(self):
         return deepcopy(self)
+
+    def get_trait_value(self, trait):
+        return getattr(self, trait, None)
 
     @property
     def var_x(self):
@@ -439,7 +446,7 @@ class RunConfig:
             raise TypeError("Input must be a pandas DataFrame or a pyarrow Table")
         else:
             df = full_ds
-        # print('pandas', df.columns)
+
         if trait not in df.columns:
             raise ValueError(f"Trait '{trait}' not found in columns")
 
@@ -470,20 +477,16 @@ class RunConfig:
         col_DataVar = DataVarConfig(proj_config, self.col_var_id, proj_dir)
         self.col_var_obj = VarObject(proj_config, proj_dir, data_var_config=col_DataVar)
 
-        # print('surr_var in set_var_objs:', self.surr_var)
-        # print(('x', self.col_var_obj.var, self.col_var_obj.surr_var))
-        if self.surr_var in ('x', self.col_var_obj.var, self.col_var_obj.surr_var):
+        if self.surr_var in ('x', self.col_var_obj.var, self.col_var_obj.surr_ts_var):
             self.col_var_obj.surr_num = self.surr_num
             self.col_var_obj.ts_type = 'surr'
-            # print('surr_num set to', self.surr_num, 'for x var')
 
         target_DataVar = DataVarConfig(proj_config, self.target_var_id, proj_dir)
         self.target_var_obj = VarObject(proj_config, proj_dir, data_var_config=target_DataVar)
 
-        if self.surr_var in ('y', self.target_var_obj.var, self.target_var_obj.surr_var):
+        if self.surr_var in ('y', self.target_var_obj.var, self.target_var_obj.surr_ts_var):
             self.target_var_obj.surr_num = self.surr_num
             self.target_var_obj.ts_type = 'surr'
-            # print('surr_num set to', self.surr_num, 'for y var')
 
         if self.col_var is None:
             self.col_var = self.col_var_obj.var
@@ -743,6 +746,9 @@ class Output:
 
     '''
     def __init__(self, full, path=None, outtype=None, tmp_dir=None):
+
+        if type(full) is pd.DataFrame:
+            full = pa.Table.from_pandas(full, preserve_index=False)
         self._full = full
         self.path = path
         self.type = outtype
@@ -770,6 +776,7 @@ class Output:
 
     @property
     def table(self):
+        self.get_table()
         return self._full
 
     @property
@@ -856,7 +863,6 @@ class OutputCollection:
         self.tmp_path = tmp_dir if tmp_dir is not None else (self.grp_config.proj_dir / 'tmp' if (self.grp_config is not None and self.grp_config.proj_dir is not None) else Path.cwd() / 'tmp')
 
         self.tmp_path.mkdir(parents=True, exist_ok=True)
-        print('dyad home?', self.tmp_path.parent.parent)
         self.dyad_home = None
         # print('temporary directory for OutputCollection:', self.tmp_path)
 
@@ -864,7 +870,13 @@ class OutputCollection:
 
     # def __init__(self, in_table):
         if isinstance(in_table, list) is False:
+            if type(in_table) is pd.DataFrame:
+                for col in ['E', 'tau', 'Tp', 'lag', 'knn', 'surr_var', 'surr_num', 'x_id', 'x_age_model_ind', 'x_var', 'y_id', 'y_age_model_ind', 'y_var', 'LibSize', 'ind_i', 'relation', 'forcing', 'responding']:
+                    if col not in in_table.columns:
+                        in_table[col] = self.grp_config.get_trait_value(col)
+                in_table = pa.Table.from_pandas(in_table, preserve_index=False)
             in_table = [in_table]
+
         if isinstance(in_table, list) and (len(in_table)>0) and isinstance(in_table[0], pa.Table):
             tables = [tbl for tbl in in_table if (tbl is not None) and (isinstance(tbl, pa.Table) is True)]
             if len(tables) >0:
@@ -1068,6 +1080,9 @@ class OutputCollection:
     def aggregate_libsize(self, query_config=None): #process_group_table
         knn = get_static(query_config.knn if query_config is not None else self.grp_config.knn)
         full = self.table.full
+        if isinstance(self.table.full, pd.DataFrame):
+            full = pa.Table.from_pandas(self.table.full)
+
         if "LibSize" in full.schema.names:
             mask = pc.greater(full["LibSize"], knn+1)
             group_table = full.filter(mask)
@@ -1388,12 +1403,11 @@ class CCMConfig(RunConfig):
 
     def __init__(self, grp_specs, config, proj_dir=None):
         iterable_d = {}
-
-        if grp_specs is not None and isinstance(grp_specs, RunConfig):
+        try:
             # Copy all attributes from the provided DataVarConfig
             for key, value in grp_specs.to_dict().items():
                 setattr(self, key, value)
-        else:
+        except:
             # Initialize as a new DataVarConfig
             super().__init__(grp_specs)
 
@@ -1412,7 +1426,7 @@ class CCMConfig(RunConfig):
         self.overwrite = None
         self.max_libsize = config.ccm_config.max_libsize
         self.libsize_step = config.ccm_config.libsize_step
-        self.libsizes = np.arange(self.knn+1, self.max_libsize+1, self.libsize_step)
+        self.libsizes = None# np.arange(self.knn+1, self.max_libsize+1, self.libsize_step)
 
 
         self.calc_location = set_calc_path(None, self.proj_dir, config, second_suffix='')
@@ -1422,7 +1436,9 @@ class CCMConfig(RunConfig):
 
         self.set_col_ts()
         self.set_target_ts()
+
         self.make_df().shift()
+        self.set_libsizes()
 
         self.time_var = [col for col in self.df.columns if col not in (self.col_var_obj.col_name, self.target_var_obj.col_name)][0]
 
@@ -1430,6 +1446,8 @@ class CCMConfig(RunConfig):
             self.sample = 100
         else:
             self.sample = 250
+
+
 
         print('ccm config initialized with output path:', self.file_path)
 
@@ -1464,6 +1482,9 @@ class CCMConfig(RunConfig):
 
         return grp_path
 
+    def set_libsizes(self):
+        self.libsizes = np.arange(self.knn + 1, self.max_libsize + 1, self.libsize_step)
+
     def set_col_ts(self, surr_num=None):
         if self.col_var_obj.ts_type == 'surr':
             if (self.col_var_obj.surr_num is None) and (surr_num is not None):
@@ -1472,7 +1493,7 @@ class CCMConfig(RunConfig):
         if self.col_var_obj.surr_num not in (0, None):
             self.col_var_obj.get_surr(self.col_var_obj.surr_num)
         else:
-            self.col_var_obj.get_raw()
+            self.col_var_obj.get_real()
 
     def set_target_ts(self, surr_num=None):
         if self.surr_var in ('y', self.target_var, 'both'):
@@ -1484,7 +1505,7 @@ class CCMConfig(RunConfig):
         if self.target_var_obj.surr_num not in (0, None):
             self.target_var_obj.get_surr(self.target_var_obj.surr_num)
         else:
-            self.target_var_obj.get_raw()
+            self.target_var_obj.get_real()
 
 
     def make_df(self):
@@ -1495,8 +1516,6 @@ class CCMConfig(RunConfig):
         self.df = merged_df.sort_values(by=self.col_var_obj.time_var).reset_index(drop=True)
 
         # self.train_ind_f = self.df.index.values[-1] if self.train_ind_f is None else self.train_ind_f
-        print('self.train_ind_f before', self.train_ind_f)
-
         self.df = self.df.iloc[self.train_ind_i : self.train_ind_f].reset_index(drop=True) if self.train_ind_f is not None else self.df.iloc[self.train_ind_i : ].reset_index(drop=True)
         return self
 
@@ -1508,6 +1527,7 @@ class CCMConfig(RunConfig):
         self.train_ind_f = shifted.index.values[-1] #if self.train_ind_f is None else self.train_ind_f
 
         self.df = shifted.reset_index(drop=True)
+        self.max_libsize = min(self.max_libsize, int(.5*len(self.df)))
 
 #
 # class RelationshipSide:

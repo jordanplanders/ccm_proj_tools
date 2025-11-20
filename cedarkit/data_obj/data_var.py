@@ -3,7 +3,13 @@ import pandas as pd
 import numpy as np
 import pyleoclim as pyleo
 
-from cedar.utils.data_access import choose_data_source, check_csv, remove_extra_index
+# from utils.data_access import choose_data_source, check_csv, remove_extra_index
+
+try:
+    from cedarkit.utils.data_access import choose_data_source, check_csv, remove_extra_index
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils.data_access import choose_data_source, check_csv, remove_extra_index
 
 
 class DataVarConfig:
@@ -100,6 +106,7 @@ class DataVarConfig:
         self.get_color(config)
 
         surr_ts_d = var_info.pop('surrogate_ts', None)
+        print(var_info, surr_ts_d)
         #surr_csv_stem
         if 'surr_csv_stem' in var_info.keys():
             self.surr_csv_stem = var_info.pop('surr_csv_stem', None)
@@ -134,7 +141,10 @@ class DataVarConfig:
         for key in var_info.keys():
             if hasattr(self, key):
                 if getattr(self, key) is None:
-                    setattr(self, key, var_info[key])
+                    try:
+                        setattr(self, key, var_info[key])
+                    except Exception as e:
+                        print(f'Error setting attribute {key} for var_id {self.var_id}: {e}')
 
     def set_surr_csv_name(self):
         if len(self.suffix) > 0:
@@ -197,6 +207,9 @@ class VarObject(DataVarConfig):
                                  label=self.var_name)
         return source_ps
 
+    # @property
+    # def surrogate_ts(self):
+    #     return self.get_surr(surr_num=self.surr_num)
 
     def set_col_name(self):
         if self.ts_type == 'real':

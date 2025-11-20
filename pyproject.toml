@@ -1,15 +1,10 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-
 [project]
-name = "cedar"
+name = "cedarkit"
 version = "0.1.0"
-description = "Cedar: supporting tools for CCM/EDM workflows, data structures, configuration parsing, and HPC pipelines."
-requires-python = ">=3.10"
+description = "Cedarkit: supporting tools for CCM/EDM workflows, data structures, configuration parsing, and HPC pipelines."
+requires-python = ">=3.11"
 readme = "README.md"
-
+license = { text = "GPL-3.0" }
 authors = [
     { name = "Jordan Landers" }
 ]
@@ -22,22 +17,15 @@ dependencies = [
     "PyYAML",
     "cloudpickle",
     "joblib",
-
-    # pyleoclim fork
-#    "pyleoclim @ git+https://github.com/LinkedEarth/Pyleoclim_util.git",
     "pyleoclim",
-
-    # pyEDM fork pinned to specific commit (branch jpl)
-    "pyEDM @ git+https://github.com/jordanplanders/pyEDM.git@5defad56bab1d673a38f6b375a78d7319ac1c8e1#egg=pyEDM"
+    "pyEDM @ git+https://github.com/jordanplanders/pyEDM.git@5defad56bab1d673a38f6b375a78d7319ac1c8e1",
 ]
 
-
-[tool.setuptools]
-package-dir = {"" = "cedar"}
-
-
 [tool.setuptools.packages.find]
-# Discover packages INSIDE cedar/ only
-where = ["cedar"]
-include = ["*"]
-exclude = ["archive2"]
+where = ["."]
+include = ["cedarkit"]
+exclude = ["archive2*"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

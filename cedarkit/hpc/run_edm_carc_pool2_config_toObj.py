@@ -1,10 +1,22 @@
 import time
 import pyEDM as pe
 import sys
-from cedar.utils.arg_parser import get_parser
-from cedar.utils.config_parser import load_config
+import os
+import pandas as pd
+import datetime
+# from utils.arg_parser import get_parser
+# from utils.config_parser import load_config
 
-from cedar.utils import process_output as po
+# from utils import process_output as po
+try:
+    from cedarkit.utils import process_output as po
+    from cedarkit.utils.config_parser import load_config
+    from cedarkit.utils.arg_parser import get_parser
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils import process_output as po
+    from utils.config_parser import load_config
+    from utils.arg_parser import get_parser
 
 
 def decide_file_handling(args, file_exists: bool, modify_datetime=None) -> tuple[bool, bool]:
@@ -72,10 +84,10 @@ def run_experiment(arg_tuple):
 
     '''
 
-    ccm_obj, cpu_count, self_predict, time_offset = arg_tuple
+    ccm_obj, cpu_count, self_predict, start_ind  = arg_tuple
 
     time_var = ccm_obj.time_var
-    run_id = int(time.time() * 1000) + time_offset
+    run_id = int(time.time() * 1000) + start_ind
 
     df_path = ccm_obj.file_path#output_dir / df_csv_name
     start_time = print_log_line('run_edm_carc_pool2_config_toObj', 'run_experiment',

@@ -7,8 +7,6 @@ from pathlib import Path
 import os
 import re
 
-proj_dir = Path(os.getcwd()).resolve().parents[0]
-sys.path.append(str(proj_dir/'ccm_proj_tools'))
 import pandas as pd
 
 # Define a dictionary of parameters to be used for generating combinations later

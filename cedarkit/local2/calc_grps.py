@@ -1,12 +1,24 @@
 import time
+from operator import index
+
 import pandas as pd
 import numpy as np
 from pathlib import Path
 import sys
 import os
 
-from cedar.utils.arg_parser import get_parser  # Assuming the common argument parser is in arg_parser.py
-from cedar.utils.config_parser import load_config
+# python
+# Preferred: absolute imports (works if you run as: python -m cedarkit.local2.calc_grps)
+try:
+    from cedarkit.utils.arg_parser import get_parser
+    from cedarkit.utils.config_parser import load_config
+    # adjust the module path below to where these helpers actually live in your project
+    from cedarkit.utils.location_helpers import check_location, set_calc_path, set_output_path
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils.arg_parser import get_parser
+    from utils.config_parser import load_config
+    from utils.location_helpers import check_location, set_calc_path, set_output_path
 
 '''
 Main script to assign group IDs based on unique parameter combinations.
@@ -103,6 +115,8 @@ def main():
         grouped['group_id'] = np.arange(start_time, start_time + len(grouped))
         grouped_df = grouped.copy()
         grouped_df.to_csv(grp_csv_path_out, index=False)
+
+    grouped_df[['col_var_id','target_var_id','E','tau','knn','Tp']].drop_duplicates(ignore_index=True).to_csv(calc_location/'E_tau_grps.csv', index=False)
 
     print('Group assignments processed successfully!', flush=True)
 

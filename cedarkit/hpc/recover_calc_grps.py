@@ -8,8 +8,8 @@ import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
 # from data_objects import extract_from_pattern
-from cedar.utils.arg_parser import get_parser
-from cedar.utils.config_parser import load_config
+from cedarkit.utils.arg_parser import get_parser
+from cedarkit.utils.config_parser import load_config
 
 # from tmp_utils.path_utils import set_calc_path, set_output_path, template_replacement
 
@@ -88,7 +88,7 @@ def check_existence_in_table(parquet_df, trait_d):
         parquet_df['target_var_id']= parquet_df['y_id']
 
     parquet_df = parquet_df[[col for col in parquet_df.columns if col in trait_d.keys()]]
-    trait_d = {key: value for key, value in trait_d.items() if key in parquet_df.columns}
+    trait_d = {key: value for key, value in trait_d.items if key in parquet_df.columns}
     mask = pd.Series([True] * len(parquet_df))
     for k, v in trait_d.items():
         mask &= (parquet_df[k] == v)
@@ -238,45 +238,33 @@ def package_calc_grp_results_to_parquet(
     tau = parts_d.get('tau', None)
     Tp = parts_d.get('Tp', 1)
     knn = parts_d.get('knn', None)
-    lag = parts_d.get('lag', None)
     col_var_id = config.col.var_id#parts_d.get('col_var_id', None)
     target_var_id = config.target.var_id#parts_d.get('target_var_id', None)
 
     existing = []
     write_paths = []
 
-    print(e_tau_dir_read, e_tau_dir_read.exists(), e_tau_dir_read.is_dir(), file=sys.stdout, flush=True)
     # if CSV input directory does not exist, return
     if not e_tau_dir_read.exists() or not e_tau_dir_read.is_dir():
         print(f"Directory {e_tau_dir_read} does not exist or is not a directory", file=sys.stderr, flush=True)
         print(f"Directory {e_tau_dir_read} does not exist or is not a directory", file=sys.stdout, flush=True)
         return write_paths, existing
 
-    lag_dir = None
-    lag_dir_d = defaultdict(list)
-    if lag is not None:
-        if (e_tau_dir_read / f'lag_{lag}').exists() is True:
-            lag_dir = e_tau_dir_read / f'lag_{lag}'
-        elif (e_tau_dir_read / f'lag{lag}').exists() is True:
-            lag_dir = e_tau_dir_read / f'lag{lag}'
-
-        if lag_dir is not None:
-            lag_dir_d[lag] = [lag_dir / fn for fn in os.listdir(lag_dir) if fn.endswith('.csv')]
+    lag_dirs = [entry for entry in sorted(os.listdir(e_tau_dir_read)) if entry.startswith("lag")]
+    if len(lag_dirs) == 0:
+        print(f"No lag* subdirectories found under {e_tau_dir_read}", file=sys.stdout, flush=True)
+        return write_paths, existing
     else:
-        lag_dirs = [entry for entry in sorted(os.listdir(e_tau_dir_read)) if entry.startswith("lag")]
-        if len(lag_dirs) == 0:
-            print(f"No lag* subdirectories found under {e_tau_dir_read}", file=sys.stdout, flush=True)
-            return write_paths, existing
-        else:
-            print(f"Found {len(lag_dirs)} lag* subdirectories under {e_tau_dir_read}",file=sys.stdout, flush=True)
-            e_tau_dir_write.mkdir(exist_ok=True, parents=True)
+        print(f"Found {len(lag_dirs)} lag* subdirectories under {e_tau_dir_read}",file=sys.stdout, flush=True)
+        e_tau_dir_write.mkdir(exist_ok=True, parents=True)
 
-        # gather CSV files under each lag directory
-        for entry in lag_dirs:
-            lag_dir = Path(os.path.join(e_tau_dir_read, entry))
-            if os.path.isdir(lag_dir) is True:
-                lag = int(entry.replace('lag_','').replace('lag',''))
-                lag_dir_d[lag]+= [lag_dir/fn for fn in os.listdir(lag_dir) if fn.endswith('.csv')]
+    # gather CSV files under each lag directory
+    lag_dir_d = defaultdict(list)
+    for entry in lag_dirs:
+        lag_dir = Path(os.path.join(e_tau_dir_read, entry))
+        if os.path.isdir(lag_dir) is True:
+            lag = int(entry.replace('lag_',''))
+            lag_dir_d[lag]+= [lag_dir/fn for fn in os.listdir(lag_dir) if fn.endswith('.csv')]
 
     # process each lag directory, gathering records checking to see if they have already been added to the target parquet file, finally writing to Parquet
     for lag, csvs in lag_dir_d.items():
@@ -292,50 +280,59 @@ def package_calc_grp_results_to_parquet(
 
         # check existing parquet to see what has been recorded
         if write_path_file_valid is True:
-            existing_parquet_table = ds.dataset(str(write_path), format="parquet").to_table()
-            print('\texisting_parquet_table rows:', existing_parquet_table.num_rows,existing_parquet_table.schema.names, file=sys.stdout, flush=True)
-            recorded_parquet = drop_duplicates(existing_parquet_table, on=['E', 'tau', 'lag', 'Tp', 'knn', 'surr_var', 'surr_num','x_id', 'y_id'] )
-            recorded_parquet_df = recorded_parquet.to_pandas()
-            recorded_parquet_df = recorded_parquet_df.rename(columns = {'x_id':'col_var_id', 'y_id':'target_var_id'})
+            # do = DataGroup(grp_d)
+            try:
+                existing_parquet_table = ds.dataset(str(write_path), format="parquet").to_table()
+                print('\texisting_parquet_table rows:', existing_parquet_table.num_rows,existing_parquet_table.schema.names, file=sys.stdout, flush=True)
+                recorded_parquet = drop_duplicates(existing_parquet_table, on=['E', 'tau', 'lag', 'Tp', 'knn', 'surr_var', 'surr_num','x_id', 'y_id'] )
+                recorded_parquet_df = recorded_parquet.to_pandas()
+                recorded_parquet_df = recorded_parquet_df.rename(columns = {'x_id':'col_var_id', 'y_id':'target_var_id'})
+
+            except:
+                write_path_file_valid = False
 
         # Process each CSV
         time_start = time.time()
         for fpath in csvs:
-
             time_2start = time.time()
             fname = fpath.name
-            if 'registry' in fname:
-                continue
+
             surr_label = fname.split('__')[-1].rsplit('.', 1)[0]
             non_surr_part = fname.rsplit('__', 1)[0]
 
             pat = rf"(\d+)_E{E}_tau{tau}_lag_(-?\d+)"
             mfile = re.fullmatch(pat, non_surr_part)
             if not mfile:
-                pat2 = rf"(\d+)_E{E}_tau{tau}_lag(-?\d+)"
-                mfile = re.fullmatch(pat2, non_surr_part)
-            if not mfile:
-                pat3 = rf"(\d+)_E{E}_tau{tau}_lag{lag}__(neither0)\.csv"
-                mfile = re.fullmatch(pat3, fname)
+                pat2 = rf"(\d+)_E{E}_tau{tau}_lag{lag}__(neither0)\.csv"
+                mfile = re.fullmatch(pat2, fname)
             if not mfile:
                 print(f"\tSkipping unrecognized file name {fname}", file=sys.stderr, flush=True)
                 continue
 
             pset_id = mfile.group(1)
             surr_var, surr_num = _parse_surr(surr_label, col_var, target_var)
-            if write_path_file_valid is True:
-                surr_df_reduced = recorded_parquet_df[(recorded_parquet_df['surr_var']==surr_var) & (recorded_parquet_df['surr_num']==surr_num)]
-                if len(surr_df_reduced) > 0:
-                    time_2end = time.time()
-                    print(f"\tSkipping {fname} because surr_var={surr_var}, surr_num={surr_num} already in {Path(write_path).name}, {time_2end - time_2start:.2f} seconds", file=sys.stdout, flush=True)
-                    sub_existing.append(fpath)
-                    continue
-
             grp_d = {'E': E, 'tau': tau, 'lag': lag, 'Tp': Tp, 'knn': knn, 'surr_var': surr_var, 'surr_num': surr_num,
                      'col_var_id': col_var_id,
                      'target_var_id': target_var_id}  # ,'col_var': col_var, 'target_var': target_var,'pset_id': pset_id,'x_age_model_ind': x_age_model_ind,'y_age_model_ind': y_age_model_ind}
             skip = False
             print('\tgrp_d for existence check:', grp_d, file=sys.stdout, flush=True)
+
+            # check if already exists in parquet
+            if write_path_file_valid is True:
+                exists = check_existence_in_table(recorded_parquet_df, grp_d)
+                # mask = pd.Series([True] * len(recorded_parquet_df))
+                # for k, v in grp_d.items():
+                #     mask &= (recorded_parquet_df[k] == v)
+                #
+                # exists = mask.any()
+                if exists == True:
+                    # print(f"\ts\t1 Skipping {fname} because already in {Path(write_path).name}", file=sys.stdout, flush=True)
+                    skip = True
+
+            if skip == True:
+                print(f"\ts\tSkipping {fname} because already in {Path(write_path).name}", file=sys.stdout, flush=True)
+                sub_existing.append(fpath)
+                continue
 
             print(f"\tr\tReading {fpath}", file=sys.stdout, flush=True)
             try:
@@ -403,7 +400,6 @@ def package_calc_grp_results_to_parquet(
             records.append(out)
             time_2end = time.time()
             print(f"\tProcessed {fname} with {len(df)} rows in {time_2end - time_2start:.2f} seconds", file=sys.stdout, flush=True)
-
         time_end = time.time()
         print(f"\tCompleted reading {len(csvs)} files under E{E}_tau{tau}, lag={lag} in {time_end - time_start:.2f} seconds", file=sys.stdout, flush=True)
 
@@ -422,7 +418,7 @@ def package_calc_grp_results_to_parquet(
                 res[c] = pd.to_numeric(res[c], errors="coerce").astype("Int64")
         new_table = pa.Table.from_pandas(res, preserve_index=False)
 
-        if write_path.exists() is True:
+        if write_path_file_valid is True:
             existing_table = pq.read_table(write_path)
             print('Existing rows in', write_path, ':', existing_table.num_rows, file=sys.stdout, flush=True)
             new_table = pa.concat_tables([existing_table, new_table], promote=True)
@@ -433,7 +429,6 @@ def package_calc_grp_results_to_parquet(
 
         print('\tCombined rows:', new_table.num_rows, file=sys.stdout, flush=True)
         print('\t', write_path, file=sys.stdout, flush=True)
-        write_path.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(new_table,
                        write_path, compression="zstd", use_dictionary=True)
 

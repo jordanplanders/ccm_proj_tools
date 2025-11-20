@@ -2,8 +2,12 @@ import pandas as pd
 from pathlib import Path
 import sys
 import re
-from cedar.utils.location_helpers import check_location
-
+# from .location_helpers import check_location
+try:
+    from cedarkit.utils.location_helpers import check_location
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils.location_helpers import check_location
 
 def check_csv(output_file_name):
     if '.csv' not in output_file_name:
