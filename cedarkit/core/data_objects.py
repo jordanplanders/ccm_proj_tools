@@ -1,8 +1,6 @@
 
 import collections.abc
-import sys
 from copy import deepcopy
-from pathlib import Path
 import pandas as pd
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
@@ -11,25 +9,33 @@ import operator
 from collections import defaultdict
 import uuid
 # from pyarrow import table
-import os
 import gc
-
+import re
 import pyarrow as pa
 import pyarrow.compute as pc
-# from data_obj.data_var import *
-try:
-    from cedarkit.data_obj.data_var import *
-    from cedarkit.data_obj.relationship_obj import *
 
-    from cedarkit.utils.location_helpers import *
+from cedarkit.utils.tables.parquet_tools import _as_len1_array, _as_lenN_array
+
+# import cedarkit.utils.paths
+# from cedarkit.utils.paths import set_calc_path, set_output_path, template_replace, check_exists
+
+# from core.data_var import *
+try:
+    from cedarkit.core.data_var import *
+    from cedarkit.core.relationship import *
+    from cedarkit.utils.routing.paths import *
+    from cedarkit.utils.routing.file_name_parsers import template_replace
+
 except ImportError:
     # Fallback: imports when running as a package
-    from data_obj.data_var import *
-    from data_obj.relationship_obj import *
-    from utils.location_helpers import *
+    from core.data_var import *
+    from core.relationship import *
+    from utils.paths import *
+    from utils.data_access import template_replace
 
 # dump
-import os, tempfile, pickle, joblib, cloudpickle
+import os
+
 
 # def log_print_helper(msg, file=sys.stdout, flush=True):
 #     print(msg, file=file, flush=flush)
@@ -41,45 +47,6 @@ import os, tempfile, pickle, joblib, cloudpickle
 #         pass
 # log_print = lambda msg, file=sys.stdout, flush=True: log_print_helper(msg, file=file, flush=flush, toggle=False)
 
-def _atomic_write(path, writer):
-    d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(prefix=".tmp_", dir=d)
-    os.close(fd)
-    try:
-        writer(tmp)
-        os.replace(tmp, path)  # atomic on POSIX
-    finally:
-        try: os.remove(tmp)
-        except OSError: pass
-
-def joblib_cloud_atomic_dump(obj, path, *, compress=3, protocol=pickle.HIGHEST_PROTOCOL):
-    blob = cloudpickle.dumps(obj, protocol=protocol)
-    _atomic_write(path, lambda tmp: joblib.dump(blob, tmp, compress=compress))
-
-def joblib_cloud_load(path):
-    blob = joblib.load(path)
-    return cloudpickle.loads(blob)
-
-
-def joblib_atomic_dump(obj, path, *, compress=3, protocol=None):
-    d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(prefix=".tmp_", dir=d)
-    os.close(fd)
-    try:
-        joblib.dump(obj, tmp, compress=compress, protocol=protocol)
-        os.replace(tmp, path)  # atomic on POSIX
-    finally:
-        if os.path.exists(tmp):
-            try: os.remove(tmp)
-            except OSError: pass
-
-def joblib_safe_load(path, *, mmap_mode=None):
-    # Try a strict load first; if it fails with EOF, surface a clear message.
-    try:
-        return joblib.load(path, mmap_mode=mmap_mode)
-    except EOFError as e:
-        raise EOFError(f"{path} appears truncated/corrupted. "
-                       "Recreate it with an atomic dump and avoid concurrent writers.") from e
 
 def correct_iterable(obj):
     if obj is None:
@@ -106,18 +73,20 @@ def get_static(obj):
         else:
             return obj
 
-def template_replace(template, d, return_replaced=True):
-    replaced = []
-    old_template = template
-    for key, value in d.items():
-        template = template.replace(f'{{{key}}}', str(value))
-        if template != old_template:
-            replaced.append(key)
-            old_template = template
-    if return_replaced is False:
-        return template
-
-    return template, replaced
+# moved to data_access
+#def template_replace(template, d, return_replaced=True):
+#     replaced = []
+#     old_template = template
+#     for key, value in d.items():
+#         template = cedarkit.utils.paths.replace(f'{{{key}}}', str(value))
+#         if template != old_template:
+#             replaced.append(key)
+#             old_template = template
+#     if return_replaced is False:
+#         return template
+#
+#     return template, replaced
+#
 
 def extract_from_pattern(filename: str, pattern_str: str):
     """
@@ -152,26 +121,6 @@ def check_return(table):
     else:
         return False
 
-_as_len1_array = lambda x: _as_lenN_array(x, 1)
-
-def _as_lenN_array(x, n):
-
-    if x is None or (isinstance(x, float) and not np.isfinite(x)):
-        return pa.array([None] * n, type=pa.float64())
-    if isinstance(x, (int, np.integer)):
-        return pa.array([int(x)] * n, type=pa.int64())
-    if isinstance(x, (float, np.floating)):
-        return pa.array([float(x)] * n, type=pa.float64())
-
-    if isinstance(x, pa.Array):
-        if len(x) == n:
-            return x
-        elif len(x) == 1:
-            return pa.repeat(x, n)
-        else:
-            raise ValueError("Cannot broadcast array of length {} to length {}".format(len(x), n))
-    # For other types (e.g., str), repeat the value n times
-    return pa.array([x] * n)
 
 def compute_delta_rho_grp(
         lag_tbl: pa.Table,
@@ -1101,7 +1050,7 @@ class OutputCollection:
         aggregated_cols = [col for col in full.schema.names if (col not in calc_grp_cols) and ('id' not in col) and ('ind' not in col) and (full[col].type in [pa.float32(), pa.float64(), pa.int32(), pa.int64()])]
         print('aggregated cols', aggregated_cols)
         grouped_aggregated_table = pa.TableGroupBy(full, calc_grp_cols).aggregate([(col, "mean") for col in aggregated_cols])
-        new_names = [col.replace('_mean', '')  for col in grouped_aggregated_table.schema.names]
+        new_names = [cedarkit.utils.paths.replace('_mean', '') for col in grouped_aggregated_table.schema.names]
         grouped_aggregated_table = grouped_aggregated_table.rename_columns(new_names)
         self.libsize_aggregated = Output(grouped_aggregated_table, outtype='libsize_aggregated', tmp_dir=self.tmp_path)#, use_case='libsize_aggregated')
         return self
@@ -1447,8 +1396,6 @@ class CCMConfig(RunConfig):
         else:
             self.sample = 250
 
-
-
         print('ccm config initialized with output path:', self.file_path)
 
     def get_filename(self, config):
@@ -1527,7 +1474,7 @@ class CCMConfig(RunConfig):
         self.train_ind_f = shifted.index.values[-1] #if self.train_ind_f is None else self.train_ind_f
 
         self.df = shifted.reset_index(drop=True)
-        self.max_libsize = min(self.max_libsize, int(.5*len(self.df)))
+        self.max_libsize = min(self.max_libsize, int(.75*len(self.df)))
 
 #
 # class RelationshipSide:

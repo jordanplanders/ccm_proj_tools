@@ -3,10 +3,13 @@ import pandas as pd
 import numpy as np
 import pyleoclim as pyleo
 
+import cedarkit.utils.routing.paths
+
 # from utils.data_access import choose_data_source, check_csv, remove_extra_index
 
 try:
-    from cedarkit.utils.data_access import choose_data_source, check_csv, remove_extra_index
+    from cedarkit.utils.routing.file_name_parsers import check_csv, remove_extra_index
+    from cedarkit.utils.io.timeseries_utils import choose_data_source
 except ImportError:
     # Fallback: imports when running as a package
     from utils.data_access import choose_data_source, check_csv, remove_extra_index
@@ -114,7 +117,7 @@ class DataVarConfig:
             self.surr_csv_stem = surr_ts_d.pop('csv_stem', None)
         elif 'surr_file_name' in var_info.keys():
             surr_file_name = var_info.pop('surr_file_name', None)
-            self.surr_csv_stem = surr_file_name.replace('.csv', '').replace('.txt', '')
+            self.surr_csv_stem = cedarkit.utils.routing.paths.replace('.txt', '')
         else:
             print(f'No surr_csv_stem found for {self.var_id}')
 

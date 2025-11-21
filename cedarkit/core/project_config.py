@@ -1,7 +1,12 @@
 import yaml
-import os
-import sys
 from pathlib import Path
+
+try:
+    import cedarkit.utils.routing.paths
+except ImportError:
+    # Fallback: imports when running as a package
+    import utils.paths
+
 
 class ProjectConfig:
     def __init__(self, config_data, file_path=None, is_root=True):

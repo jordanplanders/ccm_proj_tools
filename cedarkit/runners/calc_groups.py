@@ -1,5 +1,4 @@
 import time
-from operator import index
 
 import pandas as pd
 import numpy as np
@@ -7,18 +6,20 @@ from pathlib import Path
 import sys
 import os
 
+import cedarkit.utils.tables.parquet_tools
+
 # python
 # Preferred: absolute imports (works if you run as: python -m cedarkit.local2.calc_grps)
 try:
-    from cedarkit.utils.arg_parser import get_parser
-    from cedarkit.utils.config_parser import load_config
+    from cedarkit.utils.cli.arg_parser import get_parser
+    from cedarkit.core.project_config import load_config
     # adjust the module path below to where these helpers actually live in your project
-    from cedarkit.utils.location_helpers import check_location, set_calc_path, set_output_path
+    from cedarkit.utils.routing.paths import check_location, set_calc_path, set_output_path
 except ImportError:
     # Fallback: imports when running as a package
     from utils.arg_parser import get_parser
-    from utils.config_parser import load_config
-    from utils.location_helpers import check_location, set_calc_path, set_output_path
+    from core.project_config import load_config
+    from utils.paths import check_location, set_calc_path, set_output_path
 
 '''
 Main script to assign group IDs based on unique parameter combinations.
@@ -71,7 +72,7 @@ def main():
     params_df = params_df.iloc[start_ind:end_ind]
 
     # Deduplicate groups
-    grouped = params_df[query_keys].drop_duplicates(ignore_index=True)
+    grouped = cedarkit.utils.tables.parquet_tools.drop_duplicates(ignore_index=True)
 
     # Paths to input/output CSVs
     grp_csv_base = config.csvs.calc_grps
@@ -116,7 +117,7 @@ def main():
         grouped_df = grouped.copy()
         grouped_df.to_csv(grp_csv_path_out, index=False)
 
-    grouped_df[['col_var_id','target_var_id','E','tau','knn','Tp']].drop_duplicates(ignore_index=True).to_csv(calc_location/'E_tau_grps.csv', index=False)
+    cedarkit.utils.tables.parquet_tools.drop_duplicates(ignore_index=True).to_csv(calc_location / 'E_tau_grps.csv', index=False)
 
     print('Group assignments processed successfully!', flush=True)
 

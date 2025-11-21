@@ -1,177 +1,22 @@
-import json, hashlib
+import sys
+import time
 from collections import defaultdict
 from pathlib import Path
-import time
-import pandas as pd
+import os
+import re
+import gc
 import pyarrow as pa
-import numpy as np
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
+import pandas as pd
+
 
 try:
-    from cedarkit.utils.arg_parser import get_parser
-    from cedarkit.utils.config_parser import load_config
+    from cedarkit.utils.routing.file_name_parsers import template_replace, parse_surr_label
+    from cedarkit.utils.tables.parquet_tools import drop_duplicates, _make_uid
 except ImportError:
-    # Fallback: imports when running as a package
-    from utils.arg_parser import get_parser
-    from utils.config_parser import load_config
-
-
-# from tmp_utils.path_utils import set_calc_path, set_output_path, template_replacement
-
-KEY_COLS = [
-    "E","tau","Tp","lag",#"relation","forcing","responding",
-    "pset_id","surr_var","surr_num",
-    "x_id","x_age_model_ind","x_var",
-    "y_id","y_age_model_ind","y_var",
-]
-
-# def check_csv(output_file_name):
-#     if '.csv' not in output_file_name:
-#         output_file_name = f'{output_file_name}.csv'
-#     return output_file_name
-
-def _parse_surr(token: str, x_var: str, y_var: str):
-    """
-    Parses suffix token to determine surrogate variable and index.
-    Parameters:
-        token (str): Suffix token indicating surrogate type and index. (e.g. 'neither0', 'TSI147', 'temp033', 'both12').
-        x_var (str): Name of the first variable (e.g., 'temp').
-        y_var (str): Name of the second variable (e.g., 'TSI').
-
-    Returns:
-        (surr_var, surr_num) where surr_var ∈ {'neither', x_var, y_var, 'both'}
-
-    Used by:
-        package_calc_grp_results_to_parquet
-    """
-
-    lab_l = token.lower()
-    xv, yv = x_var.lower(), y_var.lower()
-
-    if "neither" in lab_l:
-        return "neither", 0
-    if "both" in lab_l:
-        return "both", 99999 # use a large number to indicate both but without a specific index
-    if xv in lab_l:
-        num = lab_l.replace(xv, '').strip()
-        if num.isdigit():
-            num = int(num)
-        return x_var, num
-    if yv in lab_l:
-        num = lab_l.replace(yv, '').strip()
-        if num.isdigit():
-            num = int(num)
-        return y_var, num
-    print(f"Warning: Unrecognized suffix token '{token}', treating as 'neither0'")
-
-
-def _make_uid(row: pd.Series) -> str:
-    blob = json.dumps({k: (None if pd.isna(row[k]) else row[k]) for k in KEY_COLS},
-                      sort_keys=True).encode()
-    return hashlib.blake2b(blob, digest_size=16).hexdigest()
-
-# def check_existance_in_table(table, trait_d):
-#     if table is None:
-#         return False
-#     if table.num_rows == 0:
-#         return False
-#     try:
-#         mask_list = [pc.equal(table[key], value) for key, value in trait_d.items() if key in table.schema.names]
-#         if mask_list:
-#             mask = reduce(pc.and_, mask_list)
-#             filtered_table = table.filter(mask)
-#         else:
-#             filtered_table = table
-#     except:
-#         print('failed to filter table with', trait_d, file=sys.stderr, flush=True)
-#         return False
-
-def check_existence_in_table(parquet_df, trait_d):
-    if 'x_id' in parquet_df.columns:
-        parquet_df['col_var_id'] = parquet_df['x_id']
-    if 'y_id' in parquet_df.columns:
-        parquet_df['target_var_id']= parquet_df['y_id']
-
-    parquet_df = parquet_df[[col for col in parquet_df.columns if col in trait_d.keys()]]
-    trait_d = {key: value for key, value in trait_d.items() if key in parquet_df.columns}
-    mask = pd.Series([True] * len(parquet_df))
-    for k, v in trait_d.items():
-        mask &= (parquet_df[k] == v)
-
-    exists = mask.any()
-    return exists
-
-def extract_from_pattern(filename: str, pattern_str: str):
-    """
-    Extracts parameter values from filename based on a pattern string.
-    Example:
-        extract_from_pattern("E4_tau1_lag-5.parquet", "E{E}_tau{tau}_lag{lag}")
-        -> {'E': 4, 'tau': 1, 'lag': -5}
-    """
-    # Convert format specifiers like {E}, {tau}, {lag} into named regex groups
-    # regex = re.sub(r"\{(\w+)\}", lambda m: f"(?P<{m.group(1)}>-?\\d+)", pattern_str)
-    regex = re.sub(
-        r"\{(\w+)\}",
-        lambda m: f"(?P<{m.group(1)}>[-+]?\d+(?:\.\d+)?|[A-Za-z_][\\w-]*)",
-        pattern_str
-    )
-
-    match = re.search(regex, filename)
-    if not match:
-        raise ValueError(f"Filename '{filename}' does not match pattern '{pattern_str}'")
-
-    # Convert all extracted values to integers
-    parts_d = {k: v for k, v in match.groupdict().items()}
-    parts_d = {k: int(v) if v.lstrip('-').isdigit() else v for k, v in parts_d.items()}
-    return parts_d
-
-# drop duplicates in parquet table
-def combine_column(table, name):
-    return table.column(name).combine_chunks()
-
-def groupify_array(arr):
-    # Input: Pyarrow/Numpy array
-    # Output:
-    #   - 1. Unique values
-    #   - 2. Count per unique
-    #   - 3. Sort index
-    #   - 4. Begin index per unique
-    dic, counts = np.unique(arr, return_counts=True)
-    sort_idx = np.argsort(arr)
-    return dic, counts, sort_idx, [0] + np.cumsum(counts)[:-1].tolist()
-
-f = np.vectorize(hash)
-def columns_to_array(table, columns):
-    columns = ([columns] if isinstance(columns, str) else list(set(columns)))
-    if len(columns) == 1:
-        #return combine_column(table, columns[0]).to_numpy(zero_copy_only=False)
-        return f(combine_column(table, columns[0]).to_numpy(zero_copy_only=False))
-    else:
-        values = [c.to_numpy() for c in table.select(columns).itercolumns()]
-        return np.array(list(map(hash, zip(*values))))
-
-def drop_duplicates(table, on=[], keep='first'):
-    # Gather columns to arr
-    arr = columns_to_array(table, (on if on else table.column_names))
-
-    # Groupify
-    dic, counts, sort_idxs, bgn_idxs = groupify_array(arr)
-
-    # Gather idxs
-    if keep == 'last':
-        idxs = (np.array(bgn_idxs) - 1)[1:].tolist() + [len(sort_idxs) - 1]
-    elif keep == 'first':
-        idxs = bgn_idxs
-    elif keep == 'drop':
-        idxs = [i for i, c in zip(bgn_idxs, counts) if c == 1]
-    return table.take(sort_idxs[idxs])
-
-
-# def get_col_var_and_target_var(config, parts_d):
-#     col_var = config.get_dynamic_attr("{var}.var", parts_d['col_var_id'])
-#     target_var = config.get_dynamic_attr("{var}.var", parts_d['target_var_id'])
-#     return col_var, target_var
+    from utils.routing.file_name_parsers import template_replace, parse_surr_label
+    from utils.tables.parquet_tools import drop_duplicates, _make_uid
 
 
 def setup_conversion_from_calc_grp(output_dir, config, calc_grp_d):
@@ -281,7 +126,7 @@ def package_calc_grp_results_to_parquet(
         for entry in lag_dirs:
             lag_dir = Path(os.path.join(e_tau_dir_read, entry))
             if os.path.isdir(lag_dir) is True:
-                lag = int(entry.replace('lag_','').replace('lag',''))
+                lag = int(entry.replace('lag', ''))
                 lag_dir_d[lag]+= [lag_dir/fn for fn in os.listdir(lag_dir) if fn.endswith('.csv')]
 
     # process each lag directory, gathering records checking to see if they have already been added to the target parquet file, finally writing to Parquet
@@ -300,7 +145,7 @@ def package_calc_grp_results_to_parquet(
         if write_path_file_valid is True:
             existing_parquet_table = ds.dataset(str(write_path), format="parquet").to_table()
             print('\texisting_parquet_table rows:', existing_parquet_table.num_rows,existing_parquet_table.schema.names, file=sys.stdout, flush=True)
-            recorded_parquet = drop_duplicates(existing_parquet_table, on=['E', 'tau', 'lag', 'Tp', 'knn', 'surr_var', 'surr_num','x_id', 'y_id'] )
+            recorded_parquet = drop_duplicates(existing_parquet_table, on=['E', 'tau', 'lag', 'Tp', 'knn', 'surr_var', 'surr_num', 'x_id', 'y_id'])
             recorded_parquet_df = recorded_parquet.to_pandas()
             recorded_parquet_df = recorded_parquet_df.rename(columns = {'x_id':'col_var_id', 'y_id':'target_var_id'})
 
@@ -328,7 +173,7 @@ def package_calc_grp_results_to_parquet(
                 continue
 
             pset_id = mfile.group(1)
-            surr_var, surr_num = _parse_surr(surr_label, col_var, target_var)
+            surr_var, surr_num = parse_surr_label(surr_label, col_var, target_var)
             if write_path_file_valid is True:
                 surr_df_reduced = recorded_parquet_df[(recorded_parquet_df['surr_var']==surr_var) & (recorded_parquet_df['surr_num']==surr_num)]
                 if len(surr_df_reduced) > 0:
@@ -356,10 +201,11 @@ def package_calc_grp_results_to_parquet(
             for c in ("rho","MAE","RMSE","LibSize","ind_i"):
                 take[c] = df[c] if c in present else pd.Series([pd.NA]*len(df))
 
+
             if "relation" in present:
-                rel_series = df["relation"].astype("string").str.strip().str.replace("  ", " ", regex=False)
+                rel_series = df["relation"].astype("string").str.replace("  ", " ", regex=False).str.strip()
             elif "relation_s" in present:
-                rel_series = df["relation_s"].astype("string").str.strip().str.replace("  ", " ", regex=False)
+                rel_series = df["relation_s"].astype("string").str.replace("  ", " ", regex=False).str.strip()
             else:
                 rel_series = pd.Series(pd.NA, index=df.index, dtype="string")
 
@@ -450,84 +296,3 @@ def package_calc_grp_results_to_parquet(
         write_paths.append(write_path)
 
     return write_paths, existing
-
-
-
-
-if __name__ == "__main__":
-
-    parser = get_parser()
-    args = parser.parse_args()
-
-    if args.project is not None:
-        proj_name = args.project
-    else:
-        print('project name is required', file=sys.stderr, flush=True)
-        sys.exit(0)
-
-    proj_dir = Path(os.getcwd()) / proj_name
-    config = load_config(proj_dir / 'proj_config.yaml')
-
-    second_suffix = ''
-    if args.test:
-        second_suffix = f'_{int(time.time() * 1000)}'
-
-    calc_location = set_calc_path(args, proj_dir, config, second_suffix)
-    output_dir = set_output_path(args, calc_location, config)
-
-    calc_grps_csv = calc_location / check_csv(config.csvs.calc_grps)
-    calc_grps_df = pd.read_csv(calc_grps_csv)
-    E_tau_grp_csv = args.parameters if args.parameters is not None else config.csvs.e_tau_grps
-    if args.parameters is not None:
-        print('Using E_tau groups from', args.parameters, file=sys.stdout, flush=True)
-    else:
-        print('Using E_tau groups from config:', config.csvs.e_tau_grps, file=sys.stdout, flush=True)
-
-    try:
-        E_tau_grps = pd.read_csv(calc_location / check_csv(E_tau_grp_csv))
-    except:
-        E_tau_grps = pd.DataFrame()
-
-    if len(E_tau_grps) > 0:
-        if args.inds is not None:
-            ind = int(args.inds[-1])
-            try:
-                E_tau_grp_d = E_tau_grps.iloc[ind].to_dict()
-            except Exception as e:
-                print('E_tau_grp_d error:', e, file=sys.stderr, flush=True)
-                sys.exit(0)
-
-            query_str = ' and '.join([f'{k} == {repr(v)}' for k, v in E_tau_grp_d.items()])
-            calc_grps_df2 = calc_grps_df.query(query_str).reset_index(drop=True)
-            print(f"Filtered calc_grps_df to {len(calc_grps_df2)} rows matching {E_tau_grp_d}", file=sys.stdout, flush=True)
-
-            for ind2, calc_grp in calc_grps_df2.iterrows():
-                calc_grp_d = calc_grp.to_dict()
-                print(f"\tcalc_grp {ind}", calc_grp_d, file=sys.stdout, flush=True)
-                try:
-                    write_paths, existing_paths = package_calc_grp_results_to_parquet(
-                        **setup_conversion_from_calc_grp(output_dir, config, calc_grp_d))
-                except Exception as e:
-                    print('grp error:', e)
-    else:
-        if args.inds is not None:
-            ind = int(args.inds[-1])
-            calc_grp_d = calc_grps_df.iloc[ind].to_dict()
-            try:
-                write_paths, existing = package_calc_grp_results_to_parquet(
-                    **setup_conversion_from_calc_grp(output_dir, config, calc_grp_d))
-            except Exception as e:
-                print('grp error:', e)
-        else:
-            existing, writes = [], []
-            for ind, calc_grp in calc_grps_df.iterrows():
-                calc_grp_d = calc_grp.to_dict()
-                print(f"calc_grp {ind}", calc_grp_d, file=sys.stdout, flush=True)
-                try:
-                    write_paths, existing_paths = package_calc_grp_results_to_parquet(
-                        **setup_conversion_from_calc_grp(output_dir, config, calc_grp_d))
-                    existing.extend(existing_paths)
-                    writes.extend(write_paths)
-                except Exception as e:
-                    print('grp error:', e, file=sys.stderr, flush=True)
-

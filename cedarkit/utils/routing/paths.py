@@ -1,10 +1,7 @@
-
-from pathlib import Path
+import copy
 import os
 import sys
-import types
-import collections.abc
-import copy
+from pathlib import Path
 
 
 def check_location(target_path=None, local_word='jlanders'):
@@ -14,7 +11,7 @@ def check_location(target_path=None, local_word='jlanders'):
     if local_word in str(target_path):
         return 'local'
     else:
-        return 'hpc'
+        return 'runners'
 
 
 def set_calc_path(args, proj_dir, config, second_suffix=''):
@@ -25,11 +22,14 @@ def set_calc_path(args, proj_dir, config, second_suffix=''):
 
     if calc_location is None:
         loc = check_location(proj_dir)
+        print(loc)
         calc_dir = config.get_dynamic_attr("{var}.calc_dir", loc)
+        print(calc_dir)
         calc_location = proj_dir / (calc_dir + f'{second_suffix}')  #'calc_local_tmp'
 
 
     return calc_location
+
 
 def set_output_path(args, calc_location, config):
     output_dir = None
@@ -42,28 +42,10 @@ def set_output_path(args, calc_location, config):
             output_dir = calc_location / config.hpc.output_dir
 
         except AttributeError:
-            print('AttributeError: config.hpc.output_dir not found', file=sys.stdout, flush=True)
+            print('AttributeError: config.runners.output_dir not found', file=sys.stdout, flush=True)
 
 
     return output_dir
-
-def replace(template, d):
-    for key, value in d.items():
-        template = template.replace(f'{{{key}}}', str(value))
-    return template
-
-def template_replace(template, d, return_replaced=True):
-    replaced = []
-    old_template = copy.copy(template)
-    for key, value in d.items():
-        template = template.replace(f'{{{key}}}', str(value))
-        if template != old_template:
-            replaced.append(key)
-            old_template = copy.copy(template)
-    if return_replaced is False:
-        return template
-
-    return template, replaced
 
 
 def set_grp_path(output_path, d, config=None, source='csv', grp_level='grp_dir_structure', make_grp=True):
@@ -123,6 +105,41 @@ def set_proj_dir(proj_name, current_path):
         sys.exit(0)
 
 
+def set_model_config_path(parent_path, d, config=None):
+
+    if config is not None:
+        try:
+            dir_structure = config.output.non_grp_structure
+            dir_structure_filled = replace(dir_structure, d)
+            return parent_path / dir_structure_filled
+        except:
+            pass
+    return parent_path / f'knn_{d["knn"]}' / f'tp_{d["Tp"]}' / f'lag_{d["lag"]}'
+
+
+def dict_replace(template, d):
+    if isinstance(d, dict) is False:
+        print('Error: d must be a dictionary', template, d, file=sys.stdout, flush=True)
+        return template
+    for key, value in d.items():
+        template = template.replace(f'{{{key}}}', str(value))
+    return template
+
+
+def template_replace(template, d, return_replaced=True):
+    replaced = []
+    old_template = copy.copy(template)
+    for key, value in d.items():
+        template = template.replace(f'{{{key}}}', str(value))
+        if template != old_template:
+            replaced.append(key)
+            old_template = copy.copy(template)
+    if return_replaced is False:
+        return template
+
+    return template, replaced
+
+
 def check_exists(file_name, calc_dir):
     dir_exists = os.path.exists(str(calc_dir))
     if dir_exists is False:
@@ -142,14 +159,3 @@ def check_exists(file_name, calc_dir):
         stem_exists = True
 
     return pset_exists, stem_exists
-
-def set_model_config_path(parent_path, d, config=None):
-
-    if config is not None:
-        try:
-            dir_structure = config.output.non_grp_structure
-            dir_structure_filled = replace(dir_structure, d)
-            return parent_path / dir_structure_filled
-        except:
-            pass
-    return parent_path / f'knn_{d["knn"]}' / f'tp_{d["Tp"]}' / f'lag_{d["lag"]}'

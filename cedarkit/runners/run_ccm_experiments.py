@@ -9,9 +9,9 @@ import datetime
 
 # from utils import process_output as po
 try:
-    from cedarkit.utils import process_output as po
-    from cedarkit.utils.config_parser import load_config
-    from cedarkit.utils.arg_parser import get_parser
+    from cedarkit.utils.workflow import process_output as po
+    from cedarkit.core.project_config import load_config
+    from cedarkit.utils.cli.arg_parser import get_parser
 except ImportError:
     # Fallback: imports when running as a package
     from utils import process_output as po

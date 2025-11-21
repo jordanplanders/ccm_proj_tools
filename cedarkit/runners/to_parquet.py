@@ -1,0 +1,134 @@
+from pathlib import Path
+import time
+import sys
+import pandas as pd
+
+from cedarkit.utils.io.parquet import setup_conversion_from_calc_grp, package_calc_grp_results_to_parquet
+
+try:
+    from cedarkit.utils.cli.arg_parser import get_parser
+    from cedarkit.core.project_config import load_config
+    from cedarkit.utils.io.parquet import setup_conversion_from_calc_grp, package_calc_grp_results_to_parquet
+    from cedarkit.utils.routing.paths import set_calc_path, set_output_path
+
+
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils.cli.arg_parser import get_parser
+    from core.project_config import load_config
+    from utils.io.parquet_tools import drop_duplicates, _make_uid
+    import utils.routing.paths
+    from utils.routing.file_name_parsers import parse_surr_label, template_replace
+    from utils.routing.paths import set_calc_path, set_output_path
+
+
+# from tmp_utils.path_utils import set_calc_path, set_output_path, template_replacement
+
+# def check_csv(output_file_name):
+#     if '.csv' not in output_file_name:
+#         output_file_name = f'{output_file_name}.csv'
+#     return output_file_name
+
+
+# def check_existance_in_table(table, trait_d):
+#     if table is None:
+#         return False
+#     if table.num_rows == 0:
+#         return False
+#     try:
+#         mask_list = [pc.equal(table[key], value) for key, value in trait_d.items() if key in table.schema.names]
+#         if mask_list:
+#             mask = reduce(pc.and_, mask_list)
+#             filtered_table = table.filter(mask)
+#         else:
+#             filtered_table = table
+#     except:
+#         print('failed to filter table with', trait_d, file=sys.stderr, flush=True)
+#         return False
+
+# drop duplicates in parquet table
+
+
+# def get_col_var_and_target_var(config, parts_d):
+#     col_var = config.get_dynamic_attr("{var}.var", parts_d['col_var_id'])
+#     target_var = config.get_dynamic_attr("{var}.var", parts_d['target_var_id'])
+#     return col_var, target_var
+
+
+if __name__ == "__main__":
+
+    parser = get_parser()
+    args = parser.parse_args()
+
+    if args.project is not None:
+        proj_name = args.project
+    else:
+        print('project name is required', file=sys.stderr, flush=True)
+        sys.exit(0)
+
+    proj_dir = Path(os.getcwd()) / proj_name
+    config = load_config(proj_dir / 'proj_config.yaml')
+
+    second_suffix = ''
+    if args.test:
+        second_suffix = f'_{int(time.time() * 1000)}'
+
+    calc_location = set_calc_path(args, proj_dir, config, second_suffix)
+    output_dir = set_output_path(args, calc_location, config)
+
+    calc_grps_csv = calc_location / check_csv(config.csvs.calc_grps)
+    calc_grps_df = pd.read_csv(calc_grps_csv)
+    E_tau_grp_csv = args.parameters if args.parameters is not None else config.csvs.e_tau_grps
+    if args.parameters is not None:
+        print('Using E_tau groups from', args.parameters, file=sys.stdout, flush=True)
+    else:
+        print('Using E_tau groups from config:', config.csvs.e_tau_grps, file=sys.stdout, flush=True)
+
+    try:
+        E_tau_grps = pd.read_csv(calc_location / check_csv(E_tau_grp_csv))
+    except:
+        E_tau_grps = pd.DataFrame()
+
+    if len(E_tau_grps) > 0:
+        if args.inds is not None:
+            ind = int(args.inds[-1])
+            try:
+                E_tau_grp_d = E_tau_grps.iloc[ind].to_dict()
+            except Exception as e:
+                print('E_tau_grp_d error:', e, file=sys.stderr, flush=True)
+                sys.exit(0)
+
+            query_str = ' and '.join([f'{k} == {repr(v)}' for k, v in E_tau_grp_d.items()])
+            calc_grps_df2 = calc_grps_df.query(query_str).reset_index(drop=True)
+            print(f"Filtered calc_grps_df to {len(calc_grps_df2)} rows matching {E_tau_grp_d}", file=sys.stdout, flush=True)
+
+            for ind2, calc_grp in calc_grps_df2.iterrows():
+                calc_grp_d = calc_grp.to_dict()
+                print(f"\tcalc_grp {ind}", calc_grp_d, file=sys.stdout, flush=True)
+                try:
+                    write_paths, existing_paths = package_calc_grp_results_to_parquet(
+                        **setup_conversion_from_calc_grp(output_dir, config, calc_grp_d))
+                except Exception as e:
+                    print('grp error:', e)
+    else:
+        if args.inds is not None:
+            ind = int(args.inds[-1])
+            calc_grp_d = calc_grps_df.iloc[ind].to_dict()
+            try:
+                write_paths, existing = package_calc_grp_results_to_parquet(
+                    **setup_conversion_from_calc_grp(output_dir, config, calc_grp_d))
+            except Exception as e:
+                print('grp error:', e)
+        else:
+            existing, writes = [], []
+            for ind, calc_grp in calc_grps_df.iterrows():
+                calc_grp_d = calc_grp.to_dict()
+                print(f"calc_grp {ind}", calc_grp_d, file=sys.stdout, flush=True)
+                try:
+                    write_paths, existing_paths = package_calc_grp_results_to_parquet(
+                        **setup_conversion_from_calc_grp(output_dir, config, calc_grp_d))
+                    existing.extend(existing_paths)
+                    writes.extend(write_paths)
+                except Exception as e:
+                    print('grp error:', e, file=sys.stderr, flush=True)
+

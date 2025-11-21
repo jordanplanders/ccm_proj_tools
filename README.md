@@ -71,9 +71,9 @@ cedar/
 notebooks, and HPC pipelines. Examples:
 
 ```python
-from cedarkit.utils.config_parser import ProjectConfig
-from cedarkit.data_obj.data_var import DataVar
-from cedarkit.utils.process_output import OutputProcessor
+from cedarkit.core.project_config import ProjectConfig
+from cedarkit.core.data_var import DataVar
+from cedarkit.utils.workflow.process_output import OutputProcessor
 ```
 
 ### Local workflow utilities

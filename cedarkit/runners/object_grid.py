@@ -1,5 +1,7 @@
 import pandas as pd
 
+import cedarkit.utils.tables.parquet_tools
+
 pd.option_context('mode.use_inf_as_na', True)
 
 from utils.config_parser import load_config
@@ -193,7 +195,7 @@ if __name__ == "__main__":
     E_vals = [4, 5, 6, 7, 8, 9, 10]
     tau_vals = [1, 2, 3, 4, 5, 6, 7, 8]
     comb_df = e_tau_grps_df[e_tau_grps_df['E'].isin(E_vals) & e_tau_grps_df['tau'].isin(tau_vals)].copy()
-    comb_plot_df = comb_df[[col for col in comb_df.columns if col != 'lag']].drop_duplicates()
+    comb_plot_df = cedarkit.utils.tables.parquet_tools.drop_duplicates()
     comb_plot_df = comb_plot_df.sort_values(by=['col_var_id', 'target_var_id', 'E', 'tau'])
 
     row = comb_plot_df.iloc[ind].to_dict()
