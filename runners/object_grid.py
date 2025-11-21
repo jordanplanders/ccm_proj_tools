@@ -1,11 +1,28 @@
 import pandas as pd
-
-import cedarkit.utils.tables.parquet_tools
+import sys
+import os
+import numpy as np
+import gc
+from pathlib import Path
 
 pd.option_context('mode.use_inf_as_na', True)
 
-from utils.config_parser import load_config
-from utils.arg_parser import get_parser
+try:
+    from cedarkit.utils.routing.paths import set_calc_path, set_output_path, check_csv
+    from cedarkit.core.data_objects import DataGroup, OutputCollection, GridCell
+    from cedarkit.utils.io.cloudjoblib import *
+    from cedarkit.core.project_config import load_config
+    from cedarkit.utils.cli.arg_parser import get_parser
+    import cedarkit.utils.tables.parquet_tools
+
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils.routing.paths import set_calc_path, set_output_path, check_csv
+    from core.data_objects import DataGroup, OutputCollection, GridCell
+    from utils.io.cloudjoblib import *
+    from core.project_config import load_config
+    from utils.cli.arg_parser import get_parser
+    import utils.tables.parquet_tools
 
 
 def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config, existing_output=None, calc_delta_rho_table=True,

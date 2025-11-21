@@ -14,7 +14,6 @@ import re
 import pyarrow as pa
 import pyarrow.compute as pc
 
-from cedarkit.utils.tables.parquet_tools import _as_len1_array, _as_lenN_array
 
 # import cedarkit.utils.paths
 # from cedarkit.utils.paths import set_calc_path, set_output_path, template_replace, check_exists
@@ -25,13 +24,16 @@ try:
     from cedarkit.core.relationship import *
     from cedarkit.utils.routing.paths import *
     from cedarkit.utils.routing.file_name_parsers import template_replace
+    from cedarkit.utils.tables.parquet_tools import _as_len1_array, _as_lenN_array
+
 
 except ImportError:
     # Fallback: imports when running as a package
     from core.data_var import *
     from core.relationship import *
     from utils.paths import *
-    from utils.data_access import template_replace
+    from utils.routing.file_name_parsers import template_replace
+    from utils.tables.parquet_tools import _as_len1_array, _as_lenN_array
 
 # dump
 import os
@@ -306,6 +308,11 @@ class RunConfig:
         self.tmp_dir = tmp_dir
 
         self.proj_dir = None
+
+        if self.train_ind_i is None:
+            self.train_ind_i = 0
+        self.train_ind_i = int(self.train_ind_i)
+        self.train_ind_f = int(self.train_ind_f)
 
         # self.exclusion_radius = np.abs(self.tau * (self.E - 1))
 
@@ -1050,7 +1057,7 @@ class OutputCollection:
         aggregated_cols = [col for col in full.schema.names if (col not in calc_grp_cols) and ('id' not in col) and ('ind' not in col) and (full[col].type in [pa.float32(), pa.float64(), pa.int32(), pa.int64()])]
         print('aggregated cols', aggregated_cols)
         grouped_aggregated_table = pa.TableGroupBy(full, calc_grp_cols).aggregate([(col, "mean") for col in aggregated_cols])
-        new_names = [cedarkit.utils.paths.replace('_mean', '') for col in grouped_aggregated_table.schema.names]
+        new_names = [col.replace('_mean', '') for col in grouped_aggregated_table.schema.names]
         grouped_aggregated_table = grouped_aggregated_table.rename_columns(new_names)
         self.libsize_aggregated = Output(grouped_aggregated_table, outtype='libsize_aggregated', tmp_dir=self.tmp_path)#, use_case='libsize_aggregated')
         return self
@@ -1350,15 +1357,16 @@ class OutputCollection:
 
 class CCMConfig(RunConfig):
 
-    def __init__(self, grp_specs, config, proj_dir=None):
-        iterable_d = {}
+    def __init__(self, grp_specs, config, proj_dir=None, cpus=1, exclusion_radius=None):
+
+        rc = RunConfig(grp_specs)
         try:
             # Copy all attributes from the provided DataVarConfig
-            for key, value in grp_specs.to_dict().items():
+            for key, value in rc.to_dict().items():
                 setattr(self, key, value)
         except:
             # Initialize as a new DataVarConfig
-            super().__init__(grp_specs)
+            super().__init__(rc)
 
         if proj_dir is not None:
             self.proj_dir = proj_dir
@@ -1370,7 +1378,7 @@ class CCMConfig(RunConfig):
 
         self.df = None
         self.weighted = None
-        self.exclusion_radius = np.abs(get_static(self.tau)*(get_static(self.E)-1))
+        self.exclusion_radius = np.abs(get_static(self.tau)*(get_static(self.E)-1)) if exclusion_radius is None else exclusion_radius
         self.self_predict = False
         self.overwrite = None
         self.max_libsize = config.ccm_config.max_libsize
@@ -1382,6 +1390,11 @@ class CCMConfig(RunConfig):
         self.output_dir = set_output_path(None, self.calc_location, config)
         self.output_path = self.set_output_calc_sub(config, self.output_dir, self.file_name)
         self.file_path = self.output_path / self.file_name
+        self.pred_num = None
+        self.cpus = cpus
+        self.embedded = False
+        self.id_num = None
+
 
         self.set_col_ts()
         self.set_target_ts()
@@ -1389,12 +1402,17 @@ class CCMConfig(RunConfig):
         self.make_df().shift()
         self.set_libsizes()
 
-        self.time_var = [col for col in self.df.columns if col not in (self.col_var_obj.col_name, self.target_var_obj.col_name)][0]
+        extra_cols = [col for col in self.df.columns if col not in (self.col_var_obj.col_name, self.target_var_obj.col_name)]
+        self.time_var = extra_cols[0] if len(extra_cols) >0 else None
+        self.noTime = True if self.time_var is None else False
 
         if self.target_var_obj.ts_type == 'surr' or self.col_var_obj.ts_type == 'surr':
             self.sample = 100
         else:
             self.sample = 250
+
+        self.rc = rc
+        self.outputgrp = None
 
         print('ccm config initialized with output path:', self.file_path)
 
@@ -1466,6 +1484,9 @@ class CCMConfig(RunConfig):
         self.df = self.df.iloc[self.train_ind_i : self.train_ind_f].reset_index(drop=True) if self.train_ind_f is not None else self.df.iloc[self.train_ind_i : ].reset_index(drop=True)
         return self
 
+    # def make_time_embedding
+    # def make_depth_embedding
+
     def shift(self):
         shifted = self.df.copy()
         shifted[self.target_var] = shifted[self.target_var].shift(self.lag)
@@ -1476,6 +1497,30 @@ class CCMConfig(RunConfig):
         self.df = shifted.reset_index(drop=True)
         self.max_libsize = min(self.max_libsize, int(.75*len(self.df)))
 
+    def run_ccm(self, overwrite=None, ind=None, args=None, script=None):
+
+        from cedarkit.utils.experiments.ccm import run_experiment, write_to_file
+        from cedarkit.utils.io.gonogo import decide_file_handling
+        if ind is not None:
+            self.id_num = ind
+
+        if args is None:
+            args = {'override':False, 'datetime_flag':None, 'write':'append'}
+
+        pset_exists, stem_exists = self.check_run_exists()
+        overwrite_flag = overwrite if overwrite is not None else self.overwrite
+
+        pset_exists, stem_exists = self.check_run_exists()
+        # this is strong existence criteria... if want to check for stem existence, use stem_exists
+
+        run_continue, overwrite = decide_file_handling(args, pset_exists)
+
+        ccm_out_df, df_path = run_experiment((self, script, ind))
+
+        write_to_file(ccm_out_df, df_path, overwrite=overwrite)
+        self.outputgrp = OutputCollection(grp_specs= self.rc, in_table=ccm_out_df, tmp_dir=self.proj_dir/'tmp')
+
+        return ccm_out_df, df_path
 #
 # class RelationshipSide:
 #     def __init__(self, r, relationship=None, var_x='temp', var_y='TSI', influence_word='causes'):

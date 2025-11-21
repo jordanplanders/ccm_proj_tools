@@ -2,8 +2,11 @@ import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 
-import cedarkit.utils
-from cedarkit.viz.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel
+try:
+    from cedarkit.viz.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel
+except ImportError:
+    # Fallback: imports when running as a package
+    from viz.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel
 
 
 class GridCell:
@@ -406,7 +409,7 @@ class GridPlot:
 
                     else:
                         xlabel = ax.get_xlabel()
-                        xlabel = cedarkit.utils.paths.replace('_', ' ')
+                        xlabel = xlabel.replace('_', ' ')
                         ax.set_xlabel(xlabel)
                         if (self.xlims is not None) and (len(self.xlims)>1):
                             xticks = int_yticks_within_ylim(self.xlims[0], self.xlims[-1])

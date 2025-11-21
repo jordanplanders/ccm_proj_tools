@@ -110,7 +110,7 @@ def set_model_config_path(parent_path, d, config=None):
     if config is not None:
         try:
             dir_structure = config.output.non_grp_structure
-            dir_structure_filled = replace(dir_structure, d)
+            dir_structure_filled = dict_replace(dir_structure, d)
             return parent_path / dir_structure_filled
         except:
             pass

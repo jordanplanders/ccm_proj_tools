@@ -15,9 +15,10 @@ try:
     from cedarkit.core.project_config import load_config
     # adjust the module path below to where these helpers actually live in your project
     from cedarkit.utils.routing.paths import check_location, set_calc_path, set_output_path
+    from cedarkit.utils.cli.arg_parser import get_parser
 except ImportError:
     # Fallback: imports when running as a package
-    from utils.arg_parser import get_parser
+    from utils.cli.arg_parser import get_parser
     from core.project_config import load_config
     from utils.paths import check_location, set_calc_path, set_output_path
 

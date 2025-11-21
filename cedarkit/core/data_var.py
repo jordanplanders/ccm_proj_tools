@@ -8,11 +8,12 @@ import cedarkit.utils.routing.paths
 # from utils.data_access import choose_data_source, check_csv, remove_extra_index
 
 try:
-    from cedarkit.utils.routing.file_name_parsers import check_csv, remove_extra_index
-    from cedarkit.utils.io.timeseries_utils import choose_data_source
+    from cedarkit.utils.routing.file_name_parsers import check_csv
+    from cedarkit.utils.io.timeseries_utils import choose_data_source, remove_extra_index
 except ImportError:
     # Fallback: imports when running as a package
-    from utils.data_access import choose_data_source, check_csv, remove_extra_index
+    from utils.routing.file_name_parsers import check_csv
+    from utils.io.timeseries_utils import choose_data_source, remove_extra_index
 
 
 class DataVarConfig:
@@ -69,6 +70,7 @@ class DataVarConfig:
         #     var_info = var_yaml.get(self.var_id, None) if var_yaml is not None else None
         # except:
         # print(f'reading var yaml for {self.var_id} failed, trying config')
+        print(self.var_id)
         var_info = config.get_dynamic_attr("{var}", self.var_id)
         var_info = var_info.to_dict()
         # self.load_from_config(config, proj_dir)
@@ -128,6 +130,7 @@ class DataVarConfig:
             self.surr_ts_var = surr_ts_d.pop('var', None)
         else:
             self.surr_ts_var = self.var
+        self.surr_prefix = self.surr_ts_var
 
         # surr_ts_time
         if 'surr_time_var' in var_info.keys():

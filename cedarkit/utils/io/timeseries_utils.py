@@ -1,20 +1,12 @@
 from pathlib import Path
 import pandas as pd
 
-import cedarkit.utils.routing.paths
-# if 'lplander' in os.getcwd():
-#     stem = Path('/project/julieneg_1001/lplander')
-# else:
-#     stem = Path('/Users/jlanders/PycharmProjects')
-# print('handle_data', stem)
-
-# sys.path.append(str(stem/'ccm_proj_tools'))
-# from utils.config_parser import load_config
-from cedarkit.core.data_objects import *
-from cedarkit.core.data_var import *
-
-from cedarkit.utils.routing.file_name_parsers import remove_extra_index
-from cedarkit.utils.routing.paths import check_location
+try:
+    from cedarkit.utils.routing.paths import check_location
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils.routing.file_name_parsers import remove_extra_index
+    from utils.routing.paths import check_location
 
 
 #
@@ -141,7 +133,7 @@ def package_masters(proj_dir, var_obj, detrended_surr_ms, col_var_id=None, data_
         if (modifier is not None) and (modifier !=''):
             if modifier in file_name:
                 if '_'+modifier not in file_name:
-                    file_name = cedarkit.utils.routing.paths.replace(modifier, '_' + modifier)
+                    file_name = file_name.replace(modifier, '_' + modifier)
             else:
                 file_name = f'{file_name}_{modifier}'
     else:
@@ -352,3 +344,12 @@ def choose_data_source(proj_dir, config, data_source, var_data_csv=None, data_ty
 
     var_data = remove_extra_index(var_data)
     return data_path, var_data
+
+
+def remove_extra_index(df):
+    """
+    Removes the 'Unnamed: 0' column from the DataFrame if it exists.
+    """
+    if 'Unnamed: 0' in df.columns:
+        df = df.drop(columns=['Unnamed: 0'])
+    return df

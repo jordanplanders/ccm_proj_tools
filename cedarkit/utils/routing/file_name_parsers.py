@@ -23,15 +23,6 @@ def extract_numbers(input_string):
     return re.findall(r'\d+', input_string)[-1]  # Assuming numbers are before the first '__'
 
 
-def remove_extra_index(df):
-    """
-    Removes the 'Unnamed: 0' column from the DataFrame if it exists.
-    """
-    if 'Unnamed: 0' in df.columns:
-        df = df.drop(columns=['Unnamed: 0'])
-    return df
-
-
 # # TODO migrate to DataVar
 # def pull_raw_data(config, proj_dir, var_ids, alias=True, data_source='data'):
 #     """

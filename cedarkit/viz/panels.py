@@ -4,9 +4,10 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 from matplotlib.markers import MarkerStyle
 
-import cedarkit.utils
-from cedarkit.viz.plotting_utils import check_palette_syntax, add_relation_s_inferred
-
+try:
+    from cedarkit.viz.plotting_utils import check_palette_syntax, add_relation_s_inferred
+except ImportError:
+    from viz.plotting_utils import check_palette_syntax, add_relation_s_inferred
 
 class BasePlot:
     """Class to create lag plots with optional scatter and highlighted points.
@@ -126,10 +127,10 @@ class BasePlot:
     def tidy_plot(self, legend=False, edge=True, bottom=True):
         # Axis labels
         # self.ax.set_xlabel(self.x_var)
-        self.ax.set_ylabel(cedarkit.utils.paths.replace('rho_', 'ρ'))
+        self.ax.set_ylabel(self.y_var.replace('rho_', 'ρ'))
 
         available_ylabel = self.ax.get_ylabel()
-        available_ylabel = cedarkit.utils.paths.replace('_', ' ')
+        available_ylabel = available_ylabel.replace('_', ' ')
         self.ax.set_ylabel(available_ylabel)
         # Remove duplicate legend entries if scatter used
         self.ax.grid(False)

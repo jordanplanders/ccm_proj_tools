@@ -5,11 +5,17 @@ import re
 import sys
 import time
 from pathlib import Path
+import pyarrow as pa
+import pyarrow.dataset as ds
+import pyarrow.compute as pc
 
 import numpy as np
 import pandas as pd
 
-from cedarkit.utils.routing.paths import set_grp_path, template_replace
+try:
+    from cedarkit.utils.routing.paths import set_grp_path, template_replace
+except ImportError:
+    from utils.routing.paths import set_grp_path, template_replace
 
 
 def remove_already_completed(pset, output_location, performance_consideration=False, existence_consideration=False,

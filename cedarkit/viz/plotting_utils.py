@@ -4,6 +4,8 @@ import re
 import matplotlib as mpl
 import numpy as np
 import seaborn as sns
+import pyarrow as pa
+import pyarrow.compute as pc
 
 import cedarkit.utils
 
@@ -59,7 +61,7 @@ def check_palette_syntax(palette, table):
     #     new_key = k.replace(palette_rel_word, rel_word)
     #     print(f"Replacing palette key '{k}' with '{new_key}'")
     #     new_palette[new_key] = v
-    palette = {cedarkit.utils.paths.replace(palette_rel_word, rel_word): v for k, v in palette.items()}
+    palette = {k.replace(palette_rel_word, rel_word): v for k, v in palette.items()}
     return palette
 
 
@@ -166,7 +168,7 @@ def int_yticks_within_ylim(ymin, ymax):
 
 
 def replace_supylabel(label):
-    label = cedarkit.utils.paths.replace('Doering', 'Döring')
+    label = label.replace('Doering', 'Döring')
     return label
 
 

@@ -2,8 +2,11 @@ import copy
 import os
 import shutil
 
-from cedarkit.utils.workflow.parameter_utils import get_assessed_param_picks
 
+try:
+    from cedarkit.utils.workflow.parameter_utils import get_assessed_param_picks
+except ImportError:
+    from utils.workflow.parameter_utils import get_assessed_param_picks
 
 def make_slurm_script(E_grp, new_param_file, new_file_name, slurm_dir, source_file_path, default_calc_length=25,
                       max_time_ask=240, buffer_percent=1.5, ntasks=36, append=False):
