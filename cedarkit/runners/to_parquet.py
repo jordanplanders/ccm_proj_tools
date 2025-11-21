@@ -10,16 +10,14 @@ try:
     from cedarkit.core.project_config import load_config
     from cedarkit.utils.io.parquet import setup_conversion_from_calc_grp, package_calc_grp_results_to_parquet
     from cedarkit.utils.routing.paths import set_calc_path, set_output_path
-
-
 except ImportError:
     # Fallback: imports when running as a package
-    from utils.cli.arg_parser import get_parser
-    from core.project_config import load_config
-    from utils.io.parquet_tools import drop_duplicates, _make_uid
-    import utils.routing.paths
-    from utils.routing.file_name_parsers import parse_surr_label, template_replace
-    from utils.routing.paths import set_calc_path, set_output_path
+    # from utils.cli.arg_parser import get_parser
+    # from core.project_config import load_config
+    # from utils.io.parquet_tools import drop_duplicates, _make_uid
+    # import utils.routing.paths
+    # from utils.routing.file_name_parsers import parse_surr_label, template_replace
+    # from utils.routing.paths import set_calc_path, set_output_path
 
 
 # from tmp_utils.path_utils import set_calc_path, set_output_path, template_replacement
