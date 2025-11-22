@@ -1354,6 +1354,24 @@ class OutputCollection:
 #             self.ts = surr_data[[self.time_var, self.col_name]].copy()
 #             # print(self.ts.head())
 
+def merge_variable_ts(col_var_obj, target_var_obj):
+    col_df = col_var_obj.ts.rename(columns={col_var_obj.col_name: col_var_obj.var})
+    target_df = target_var_obj.ts.rename(columns={target_var_obj.col_name: target_var_obj.var})
+    try:
+        merged_df = pd.merge(col_df, target_df, on=col_var_obj.time_var, how='inner')
+    except:
+        time_types = [type(col_var_obj.delta_ts), type(target_var_obj.delta_ts)]
+        if any([t in [int, float, np.int64, np.float64] for t in time_types]):
+            col_df[col_var_obj.time_var] = col_df[col_var_obj.time_var].astype(float)
+            target_df[target_var_obj.time_var] = target_df[target_var_obj.time_var].astype(float)
+        else:
+            col_df[col_var_obj.time_var] = col_df[col_var_obj.time_var].astype(int)
+            target_df[target_var_obj.time_var] = target_df[target_var_obj.time_var].astype(int)
+        merged_df = pd.merge(col_df, target_df, on=col_var_obj.time_var, how='inner')
+
+    df = merged_df.sort_values(by=col_var_obj.time_var).reset_index(drop=True)
+    return df
+
 
 class CCMConfig(RunConfig):
 
@@ -1474,11 +1492,22 @@ class CCMConfig(RunConfig):
 
 
     def make_df(self):
-        col_df = self.col_var_obj.ts.rename(columns={self.col_var_obj.col_name: self.col_var_obj.var})
-        target_df = self.target_var_obj.ts.rename(columns={self.target_var_obj.col_name: self.target_var_obj.var})
-
-        merged_df = pd.merge(col_df, target_df, on=self.col_var_obj.time_var, how='inner')
-        self.df = merged_df.sort_values(by=self.col_var_obj.time_var).reset_index(drop=True)
+        self.df = merge_variable_ts(self.col_var_obj, self.target_var_obj)
+        # col_df = self.col_var_obj.ts.rename(columns={self.col_var_obj.col_name: self.col_var_obj.var})
+        # target_df = self.target_var_obj.ts.rename(columns={self.target_var_obj.col_name: self.target_var_obj.var})
+        # try:
+        #     merged_df = pd.merge(col_df, target_df, on=self.col_var_obj.time_var, how='inner')
+        # except:
+        #     time_types = [type(self.col_var_obj.delta_ts), type(self.target_var_obj.delta_ts)]
+        #     if any([t in [int, float, np.int64, np.float64] for t in time_types]):
+        #         col_df[self.col_var_obj.time_var] = col_df[self.col_var_obj.time_var].astype(float)
+        #         target_df[self.target_var_obj.time_var] = target_df[self.target_var_obj.time_var].astype(float)
+        #     else:
+        #         col_df[self.col_var_obj.time_var] = col_df[self.col_var_obj.time_var].astype(int)
+        #         target_df[self.target_var_obj.time_var] = target_df[self.target_var_obj.time_var].astype(int)
+        #     merged_df = pd.merge(col_df, target_df, on=self.col_var_obj.time_var, how='inner')
+        #
+        # self.df = merged_df.sort_values(by=self.col_var_obj.time_var).reset_index(drop=True)
 
         # self.train_ind_f = self.df.index.values[-1] if self.train_ind_f is None else self.train_ind_f
         self.df = self.df.iloc[self.train_ind_i : self.train_ind_f].reset_index(drop=True) if self.train_ind_f is not None else self.df.iloc[self.train_ind_i : ].reset_index(drop=True)
