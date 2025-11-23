@@ -1,7 +1,7 @@
 # cedarkit package
-import cedarkit.utils as utils
-import cedarkit.core as core
-import cedarkit.viz as viz
+from . import utils
+from . import core
+from . import viz
 
 # import cedarkit.utils.experiments as experiments
 # import cedarkit.utils.io as io
