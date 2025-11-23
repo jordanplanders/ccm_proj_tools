@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 from matplotlib.markers import MarkerStyle
 
 try:
-    from cedarkit.viz.plotting_utils import check_palette_syntax, add_relation_s_inferred
+    from cedarkit.utils.plotting.plotting_utils import check_palette_syntax, add_relation_s_inferred
 except ImportError:
     from viz.plotting_utils import check_palette_syntax, add_relation_s_inferred
 

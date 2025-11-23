@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 try:
-    from cedarkit.viz.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel
+    from cedarkit.utils.plotting.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel
 except ImportError:
     # Fallback: imports when running as a package
     from viz.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel
