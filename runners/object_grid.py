@@ -11,7 +11,7 @@ try:
     from cedarkit.utils.routing.paths import set_calc_path, set_output_path, check_location
     from cedarkit.utils.routing.file_name_parsers import check_csv
     from cedarkit.core.data_objects import *
-    from cedarkig.viz.grids import GridCell
+    from cedarkit.viz.grids import GridCell
     from cedarkit.utils.io.cloudjoblib import *
     from cedarkit.core.project_config import load_config
     from cedarkit.utils.cli.arg_parser import get_parser
