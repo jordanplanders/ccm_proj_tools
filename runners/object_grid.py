@@ -13,7 +13,7 @@ try:
     from cedarkit.utils.io.cloudjoblib import *
     from cedarkit.core.project_config import load_config
     from cedarkit.utils.cli.arg_parser import get_parser
-    import cedarkit.utils.tables.parquet_tools
+    from cedarkit.utils.tables.parquet_tools import *
 
 except ImportError:
     # Fallback: imports when running as a package
@@ -22,7 +22,7 @@ except ImportError:
     from utils.io.cloudjoblib import *
     from core.project_config import load_config
     from utils.cli.arg_parser import get_parser
-    import utils.tables.parquet_tools
+    from  utils.tables.parquet_tools import *
 
 
 def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config, existing_output=None, calc_delta_rho_table=True,
@@ -212,7 +212,7 @@ if __name__ == "__main__":
     E_vals = [4, 5, 6, 7, 8, 9, 10]
     tau_vals = [1, 2, 3, 4, 5, 6, 7, 8]
     comb_df = e_tau_grps_df[e_tau_grps_df['E'].isin(E_vals) & e_tau_grps_df['tau'].isin(tau_vals)].copy()
-    comb_plot_df = cedarkit.utils.tables.parquet_tools.drop_duplicates()
+    comb_plot_df = comb_df.drop_duplicates()
     comb_plot_df = comb_plot_df.sort_values(by=['col_var_id', 'target_var_id', 'E', 'tau'])
 
     row = comb_plot_df.iloc[ind].to_dict()
