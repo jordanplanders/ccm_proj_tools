@@ -65,7 +65,7 @@ def make_slurm_script(E_grp, new_param_file, new_file_name, slurm_dir, source_fi
 
 
 def gen_parameters_slurm2(proj_dir, output_location, comb_df, min_num_to_run=8, config=None,parameter_dir=None, surr=False, surr_num=201, groupby_var = None, testmode=True,
-                           tp_vals = [1], knn_vals = [20], suffix = '', append=False, proj_prefix= 'eevw', default_calc_length=28,surr_vars=None,sample=150,
+                           tp_vals = [1], knn_vals = [20], suffix = '', append=False, proj_prefix= 'eevw', default_calc_length=28,surr_vars=None,sample=150,return_combined=False,
                                           source=None, ntasks=42, max_time_ask=300, verbose= False):
     """
     Generate slurm scripts for running CCM parameters based on combinations in comb_df.
@@ -102,6 +102,11 @@ def gen_parameters_slurm2(proj_dir, output_location, comb_df, min_num_to_run=8, 
                             ntasks=ntasks, max_time_ask=max_time_ask, group_vars = copy.copy(groupby_var), append=append, config=config, verbose=verbose)
     for message in messages2:
         print(message)
+
+    if return_combined is True:
+        return combined_df
+    else:
+        return None
 
 
 def gen_slurm_param_from_params(output_location, proj_dir, combined_df, messages=[], parameter_flag='params',min_num_to_run=5,
