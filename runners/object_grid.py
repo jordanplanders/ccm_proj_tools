@@ -9,6 +9,7 @@ pd.option_context('mode.use_inf_as_na', True)
 
 try:
     from cedarkit.utils.routing.paths import set_calc_path, set_output_path, check_location
+    from cedarkit.utils.routing.file_name_parsers import check_csv
     from cedarkit.core.data_objects import *
     from cedarkig.viz.grids import GridCell
     from cedarkit.utils.io.cloudjoblib import *
@@ -19,6 +20,7 @@ try:
 except ImportError:
     # Fallback: imports when running as a package
     from utils.routing.paths import set_calc_path, set_output_path, check_location
+    from utils.routing.file_name_parsers import check_csv
     from core.data_objects import *
     from viz.grids import GridCell
     from utils.io.cloudjoblib import *
