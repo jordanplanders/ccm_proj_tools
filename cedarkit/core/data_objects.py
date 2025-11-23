@@ -1395,7 +1395,7 @@ class CCMConfig(RunConfig):
         self.file_name = self.get_filename(config)
 
         self.df = None
-        self.weighted = None
+        self.weighted = False
         self.exclusion_radius = np.abs(get_static(self.tau)*(get_static(self.E)-1)) if exclusion_radius is None else exclusion_radius
         self.self_predict = False
         self.overwrite = None
