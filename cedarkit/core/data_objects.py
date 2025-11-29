@@ -13,6 +13,10 @@ import gc
 import re
 import pyarrow as pa
 import pyarrow.compute as pc
+import sys
+import inspect
+import os
+from pathlib import Path
 
 
 # import cedarkit.utils.paths
@@ -24,8 +28,9 @@ try:
     from cedarkit.core.relationship import *
     from cedarkit.utils.routing.paths import *
     from cedarkit.utils.routing.file_name_parsers import template_replace
-    from cedarkit.utils.tables.parquet_tools import _as_len1_array, _as_lenN_array
-
+    from cedarkit.utils.tables.parquet_tools import as_len1_array, as_lenN_array
+    # from cedarkit.utils.cli.logging import print_log_line
+    from cedarkit.utils.cli.logging import log_line
 
 except ImportError:
     # Fallback: imports when running as a package
@@ -34,20 +39,13 @@ except ImportError:
     from utils.paths import *
     from utils.routing.file_name_parsers import template_replace
     from utils.tables.parquet_tools import _as_len1_array, _as_lenN_array
+    from utils.cli.logging import log_line
 
 # dump
 import os
-
-
-# def log_print_helper(msg, file=sys.stdout, flush=True):
-#     print(msg, file=file, flush=flush)
-
-# def log_print_helper(msg, file=sys.stdout, flush=True, toggle=True):
-#     if toggle is True:
-#         print(msg, file=file, flush=flush)
-#     else:
-#         pass
-# log_print = lambda msg, file=sys.stdout, flush=True: log_print_helper(msg, file=file, flush=flush, toggle=False)
+# SCRIPT = Path(__file__).resolve().name
+import logging
+logger = logging.getLogger(__name__)
 
 
 def correct_iterable(obj):
@@ -157,10 +155,11 @@ def compute_delta_rho_grp(
 
     Used by OutputGrp.calc_delta_rho
     """
-
     # lag_tbl = self.table.full
     if lag_tbl is None or lag_tbl.num_rows == 0:
-        print('empty lag_tbl')
+        log_line(logger, 'empty lag_tbl', indent=0,
+                 log_type="info")
+        # print_log_line(SCRIPT, inspect.currentframe().f_code.co_name, 'empty lag_tbl', level=0, log_type='error')
         return (None, None)
 
     lib = lag_tbl['LibSize']
@@ -228,13 +227,13 @@ def compute_delta_rho_grp(
         cols = {}
         # group descriptors (length-1 columns)
         for k, v in gd.items():
-            cols[k] = _as_len1_array(get_static(v))
+            cols[k] = as_len1_array(get_static(v))
 
-        cols['maxrho'] = _as_len1_array(best_mean_rho)# if np.isfinite(best_mean_rho) else np.nan)
-        cols['minlibsize_rho'] = _as_len1_array(min_mean_rho) #if np.isfinite(min_mean_rho) else np.nan)
-        cols['maxlibsize_rho'] = _as_len1_array(max_mean_rho)# if np.isfinite(max_mean_rho) else np.nan)
-        cols['delta_rho'] = _as_len1_array(delta_rho) #if np.isfinite(delta_rho) else np.nan)
-        cols['annotation'] = _as_len1_array(annotation)
+        cols['maxrho'] = as_len1_array(best_mean_rho)# if np.isfinite(best_mean_rho) else np.nan)
+        cols['minlibsize_rho'] = as_len1_array(min_mean_rho) #if np.isfinite(min_mean_rho) else np.nan)
+        cols['maxlibsize_rho'] = as_len1_array(max_mean_rho)# if np.isfinite(max_mean_rho) else np.nan)
+        cols['delta_rho'] = as_len1_array(delta_rho) #if np.isfinite(delta_rho) else np.nan)
+        cols['annotation'] = as_len1_array(annotation)
 
         stats_tbl = pa.table(cols)
 
@@ -248,11 +247,11 @@ def compute_delta_rho_grp(
             'delta_rho': delta_rho_vec,
             # For parity with your dict, expose maxrho as the vector from the best window
             'maxrho': best_rhos,
-            'annotation': _as_lenN_array(annotation, len(max_rhos)) #annotations#_repeat_scalar(annotation, sample_size, pa.string()),
+            'annotation': as_lenN_array(annotation, len(max_rhos)) #annotations#_repeat_scalar(annotation, sample_size, pa.string()),
         }
         # replicate gd for each row
         for k, v in gd.items():
-            cols_full[k] = _as_lenN_array(get_static(v), len(max_rhos))
+            cols_full[k] = as_lenN_array(get_static(v), len(max_rhos))
 
         full_tbl = pa.table(cols_full)
 
@@ -275,6 +274,9 @@ class RunConfig:
     Inherited by DataGroup class
     '''
     def __init__(self, grp_d, tmp_dir=None):
+
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+
         self.E = None
         self.tau = None
         self.lag = None
@@ -301,8 +303,8 @@ class RunConfig:
         self.relation=None
 
         self.pset_id=None
-        self.train_ind_i = None
-        self.train_ind_f = -1
+        # self.train_ind_i = None
+        # self.train_ind_f = None
 
         self.populate(grp_d)
         self.tmp_dir = tmp_dir
@@ -311,19 +313,41 @@ class RunConfig:
 
         if self.train_ind_i is None:
             self.train_ind_i = 0
-        self.train_ind_i = int(self.train_ind_i)
-        self.train_ind_f = int(self.train_ind_f)
+            self.train_ind_i = int(self.train_ind_i)
+        if self.train_ind_f is None:
+            self.train_ind_f = -1
+            self.train_ind_f = int(self.train_ind_f)
 
         # self.exclusion_radius = np.abs(self.tau * (self.E - 1))
 
     def populate(self, grp_d):
+        # print('Populating RunConfig with grp_d:', grp_d, file=sys.stdout, flush=True)
+        # print_log_line(SCRIPT, inspect.currentframe().f_code.co_name, ['Populating RunConfig with grp_d:', grp_d], level=1, log_type='info')
+        log_line(
+            self.log,
+            ["Populating RunConfig with grp_d:", grp_d],
+            indent=1,
+            log_type="debug",  # or "info", but debug is nice for “comment/uncomment” style
+        )
+
         for key, value in grp_d.items():
             if hasattr(self, key):
                 setattr(self, key, value)
+                log_line( self.log,["Sets RunConfig trait", key, "to", value], indent=2, log_type="debug")
                 # print('Sets RunConfig trait', key, 'to', value, file=sys.stdout, flush=True)
 
         if self.pset_id is None:
             self.pset_id = grp_d.get('id', None)
+
+
+        log_line(
+            self.log,
+            ["RunConfig populated traits:", self.to_dict()],
+            indent=1,
+            log_type="debug",
+        )
+        # print('RunConfig populated traits:', self.to_dict(), file=sys.stdout, flush=True)
+
 
     def copy(self):
         return deepcopy(self)
@@ -349,7 +373,7 @@ class RunConfig:
 
     @property
     def traits(self):
-        return [key for key in self.__dict__.keys() if key not in ['output_path']]
+        return [key for key in self.__dict__.keys() if key not in ['output_path', 'log']]
 
     def to_dict(self):
         return {key: value for key, value in self.__dict__.items() if key in self.traits and value is not None}
@@ -357,10 +381,13 @@ class RunConfig:
     def pull_output(self, to_table=False, limit_surr=True):
         if self.output_path is None or len(self.output_path) == 0:
             print('no output path specified')
+            log_line(self.log, 'no output path specified', indent=0, log_type="error")
             return
 
         file_path = self.output_path[0]
-        print('pulling from', file_path)
+        log_line(self.log, ['pulling from', file_path], indent=0, log_type="info")
+
+        # print('pulling from', file_path)
         dset = ds.dataset(str(file_path), format="parquet")
         all_traits = self.to_dict()
 
@@ -474,6 +501,7 @@ class DataGroup:
 
     '''
     def __init__(self, grp_d, tmp_dir=None):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.file_list = []
         self.grp_d = grp_d  # dictionary of group-level traits
@@ -514,15 +542,29 @@ class DataGroup:
 
         combined_filter = reduce(operator.and_, filters.values())
         table = dset.to_table(filter=combined_filter)
-        print('_internal_query: filtered table rows', table.num_rows, file=sys.stdout, flush=True)
+        log_line(self.log, ['_internal_query: filtered table rows', table.num_rows], indent=0, log_type="debug")
 
+        # print('_internal_query: filtered table rows', table.num_rows, file=sys.stdout, flush=True)
+        # log_line(
+        #     self.log,
+        #     ["_internal_query: filtered table rows", table.num_rows],
+        #     indent=0,
+        #     log_type="debug",
+        # )
         grp_info = {}
         for key in self.parent_config.traits:
             if key in table.schema.names:
                 unique_elements = pc.unique(table[key]).to_pylist()
                 grp_info[key] = unique_elements
 
-        print('_internal_query: initial grp_info traits:', grp_info, file=sys.stdout, flush=True)
+        log_line(
+            self.log,
+            ["_internal_query: initial grp_info traits:", grp_info],
+            indent=0,
+            log_type="debug",
+        )
+        # print('_internal_query: initial grp_info traits:', grp_info, file=sys.stdout, flush=True)
+
         for key, value in all_traits.items():
             if value is None:
                 continue
@@ -532,11 +574,58 @@ class DataGroup:
                 outliers = correct_iterable(value)
             if outliers is not None:
                 grp_info[key] = correct_iterable(outliers)
+        # print('\ttable info schema names:', table.schema.names, table.num_rows, file=sys.stdout, flush=True)
+        # print('\t_internal_query: final grp_info traits:', grp_info, file=sys.stdout, flush=True)
 
-        print('_internal_query: final grp_info traits:', grp_info, file=sys.stdout, flush=True)
-        file_group_config = RunConfig(grp_info, tmp_dir=self.tmp_dir)
-        print('_internal_query: RunConfig traits:', file_group_config.to_dict(), file=sys.stdout, flush=True)
-        print('_internal_query: returning table rows', table.num_rows, file=sys.stdout, flush=True)
+        log_line(
+            self.log,
+            ["table info schema names:", table.schema.names, "rows:", table.num_rows],
+            indent=1,
+            log_type="debug",
+        )
+        log_line(
+            self.log,
+            ["_internal_query: final grp_info traits:", grp_info],
+            indent=1,
+            log_type="debug",
+        )
+        try:
+            file_group_config = RunConfig(grp_info, tmp_dir=self.tmp_dir)
+            # print('\t_internal_query: created RunConfig successfully', file=sys.stdout, flush=True)
+            log_line(
+                self.log,
+                ["_internal_query: created RunConfig successfully"],
+                indent=1,
+                log_type="debug",
+            )
+        except Exception as e:
+            # print('Failed to create RunConfig in _internal_query with grp_info:', grp_info, 'Error:', e, file=sys.stdout, flush=True)
+            log_line(
+                self.log,
+                [
+                    "Failed to create RunConfig in _internal_query with grp_info:",
+                    grp_info,
+                    "Error:",
+                    e,
+                ],
+                indent=0,
+                log_type="error",
+            )
+            raise e
+        # print('\t_internal_query: RunConfig traits:', file_group_config, file=sys.stdout, flush=True)
+        # print('_internal_query: returning table rows', table.num_rows, file=sys.stdout, flush=True)
+        log_line(
+            self.log,
+            ["_internal_query: RunConfig traits:", file_group_config.to_dict()],
+            indent=1,
+            log_type="debug",
+        )
+        log_line(
+            self.log,
+            ["_internal_query: returning table rows", table.num_rows],
+            indent=0,
+            log_type="debug",
+        )
         return file_group_config, table
 
 
@@ -560,6 +649,9 @@ class DataGroup:
             file_name_pattern = config.output.parquet.file_name#get_dynamic_attr("output.parquet.file_name{var}", "file_name_pattern")  # config.output.file_name_pattern
 
         grp_path_template_filled, replaced_parts = template_replace(grp_path_template, self.static_traits)
+        log_line(self.log, ['DataGroup get_files: grp_path_template_filled:', grp_path_template_filled], indent=0, log_type="debug")
+
+        # print('DataGroup get_files: grp_path_template_filled:', grp_path_template_filled, file=sys.stdout, flush=True)
 
         known_sections = grp_path_template_filled.split('/')
         bracket_locations = [ik for ik, section in enumerate(known_sections) if '{' in section]
@@ -588,6 +680,10 @@ class DataGroup:
                                           '.ipynb' not in filename) and ('.png' not in filename)]
 
                 for file_path in filtered_files:
+                    log_line(self.log, ['DataGroup get_files: checking file', file_path],
+                             indent=0, log_type="debug")
+
+                    # print('DataGroup get_files: checking file', file_path, file=sys.stdout, flush=True)
                     try:
                         file_traits = extract_from_pattern(file_path.name, file_name_pattern)
                         file_dict = {**{key: self.static_traits[key] for key in replaced_parts}, **file_traits}
@@ -611,9 +707,14 @@ class DataGroup:
 
                             try:
                                 loaded_ds = ds.dataset(str(file_path), format="parquet")
+                                log_line(self.log, ['get_files: loaded dataset for file', file_path],
+                                         indent=0, log_type="debug")
+                                # print('get_files: loaded dataset for file', file_path, file=sys.stdout, flush=True)
                                 groupconfig_file, filtered_table  = self._internal_query(loaded_ds,
                                                                                     query_config=new_config)
-                                print('get_files: filtered table rows after query', filtered_table.num_rows, 'for file', file_path,'fail status:', fail,file=sys.stdout, flush=True)
+                                log_line(self.log, ['get_files: filtered table rows after query', filtered_table.num_rows, 'for file', file_path,'fail status:', fail],
+                                         indent=0, log_type="debug")
+                                # print('get_files: filtered table rows after query', filtered_table.num_rows, 'for file', file_path,'fail status:', fail,file=sys.stdout, flush=True)
                             except:
                                 filtered_table = None
                                 fail=True
@@ -621,16 +722,22 @@ class DataGroup:
                             # print('fail status after filtering', fail, 'for file', file_path,'filtered_table', filtered_table, file=sys.stdout, flush=True)
 
                             if filtered_table is None:
-                                print('get_files: filtered table is None, failing for file', file_path, file=sys.stdout, flush=True)
+                                # print('get_files: filtered table is None, failing for file', file_path, file=sys.stdout, flush=True)
+                                log_line(self.log, ['get_files: filtered table is None, failing for file', file_path],
+                                         indent=0, log_type="error")
                                 fail = True
 
                             elif filtered_table.num_rows == 0:
-                                print('get_files: filtered table has 0 rows, failing for file', file_path, file=sys.stdout, flush=True)
+                                log_line(self.log, ['get_files: filtered table has 0 rows, failing for file', file_path],
+                                         indent=0, log_type="error")
+                                # print('get_files: filtered table has 0 rows, failing for file', file_path, file=sys.stdout, flush=True)
                                 fail = True
 
                         if fail is False:
                             groupconfig_file.output_path = [file_path]
-                            print('did not fail for file', file_path, file=sys.stdout, flush=True)
+                            # print('did not fail for file', file_path, file=sys.stdout, flush=True)
+                            log_line(self.log, ['did not fail for file', file_path],
+                                     indent=0, log_type="info")
                             file_list.append(groupconfig_file)
 
                             for key in groupconfig_file.traits:
@@ -649,10 +756,14 @@ class DataGroup:
                                         missing_files[file_path][key] = list(
                                             set(correct_iterable(missing_files[file_path][key])) | set(
                                                 correct_iterable(file_dict[key])))
-                            print('missing files', len(missing_files), file=sys.stdout, flush=True)
+                            # print('missing files', len(missing_files), file=sys.stdout, flush=True)
+                            log_line(self.log, ['missing files', len(missing_files)],
+                                     indent=0, log_type="info")
 
                     except ValueError as e:
-                        print(e, file=sys.stderr, flush=True)
+                        log_line(self.log, e,
+                                 indent=0, log_type="error")
+                        # print(e, file=sys.stderr, flush=True)
 
         nonstatic_updates = {key: list(value) for key, value in nonstatic_updates.items()}
         for key in nonstatic_updates.keys():
@@ -661,7 +772,9 @@ class DataGroup:
             else:
                 self.nonstatic_traits[key] = nonstatic_updates[key]
         self.file_list = file_list
-
+        # print('DataGroup get_files: found', len(self.file_list), 'files', file=sys.stdout, flush=True)
+        log_line(self.log, ['DataGroup get_files: found', len(self.file_list), 'files'],
+                 indent=0, log_type="info")
         self.missing_files.update(missing_files)
 
     def pull_output(self, summary=True, full=False):
@@ -673,7 +786,9 @@ class DataGroup:
 
         for ij, groupconfig_file in enumerate(self.file_list):
             filtered_table = groupconfig_file.pull_output(to_table=True)
-            print('pulled table rows', filtered_table.num_rows)
+            # print('pulled table rows', filtered_table.num_rows)
+            log_line(self.log, ['pulled table rows', filtered_table.num_rows],
+                     indent=0, log_type="info")
             if check_return(filtered_table) is True: tables.append(filtered_table)
 
         return OutputCollection(grp_specs=self.get_group_config(), in_table=tables, tmp_dir=self.tmp_dir) #if (len(tables) > 0) else None
@@ -702,6 +817,7 @@ class Output:
 
     '''
     def __init__(self, full, path=None, outtype=None, tmp_dir=None):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         if type(full) is pd.DataFrame:
             full = pa.Table.from_pandas(full, preserve_index=False)
@@ -746,7 +862,7 @@ class Output:
 
     def clear_table(self):
         """Release memory held by self.table and Arrow pools."""
-        if hasattr(self, "table") and self._full is not None:
+        if self._full is not None:
             self._full = None
         gc.collect()
         pa.default_memory_pool().release_unused()
@@ -790,6 +906,7 @@ class OutputCollection:
 
     '''
     def __init__(self, grp_specs=None, in_table=None, outtype=None, tmp_dir=None):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.dyad_home = None
 
@@ -849,7 +966,9 @@ class OutputCollection:
                 try:
                     self.combine_OutputCollections(attr, outputcollections)
                 except Exception as e:
-                    print(f'Error combining OutputCollections for attribute {attr}: {e}')
+                    log_line(self.log, f'Error combining OutputCollections for attribute {attr}: {e}',
+                             indent=0, log_type="error")
+                    # print(f'Error combining OutputCollections for attribute {attr}: {e}')
 
         self.relationships = Relationship(self.grp_config.var_x, self.grp_config.var_y) if self.grp_config is not None else None
 
@@ -1055,7 +1174,9 @@ class OutputCollection:
                 calc_grp_cols.append('relation')
 
         aggregated_cols = [col for col in full.schema.names if (col not in calc_grp_cols) and ('id' not in col) and ('ind' not in col) and (full[col].type in [pa.float32(), pa.float64(), pa.int32(), pa.int64()])]
-        print('aggregated cols', aggregated_cols)
+        # print('aggregated cols', aggregated_cols)
+        log_line(self.log, ['aggregated cols', aggregated_cols],
+                 indent=0, log_type="debug")
         grouped_aggregated_table = pa.TableGroupBy(full, calc_grp_cols).aggregate([(col, "mean") for col in aggregated_cols])
         new_names = [col.replace('_mean', '') for col in grouped_aggregated_table.schema.names]
         grouped_aggregated_table = grouped_aggregated_table.rename_columns(new_names)
@@ -1376,6 +1497,7 @@ def merge_variable_ts(col_var_obj, target_var_obj):
 class CCMConfig(RunConfig):
 
     def __init__(self, grp_specs, config, proj_dir=None, cpus=1, exclusion_radius=None):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         rc = RunConfig(grp_specs)
         try:
@@ -1432,7 +1554,9 @@ class CCMConfig(RunConfig):
         self.rc = rc
         self.outputgrp = None
 
-        print('ccm config initialized with output path:', self.file_path)
+        # print('ccm config initialized with output path:', self.file_path)
+        log_line(self.log, ['ccm config initialized with output path:', self.file_path],
+                 indent=0, log_type="info")
 
     def get_filename(self, config):
         # generate filename of CCM CSV based on template in config
