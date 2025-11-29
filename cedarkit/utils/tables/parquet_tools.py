@@ -5,7 +5,14 @@ import numpy
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import logging
+logger = logging.getLogger(__name__)
 
+try:
+    from cedarkit.utils.cli.logging import setup_logging, log_line
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils.cli.logging import setup_logging, log_line
 
 KEY_COLS = [
     "E","tau","Tp","lag",#"relation","forcing","responding",
@@ -77,16 +84,16 @@ def drop_duplicates(table, on=[], keep='first'):
     return table.take(sort_idxs[idxs])
 
 
-def _make_uid(row: pd.Series) -> str:
+def make_uid(row: pd.Series) -> str:
     blob = json.dumps({k: (None if pd.isna(row[k]) else row[k]) for k in KEY_COLS},
                       sort_keys=True).encode()
     return hashlib.blake2b(blob, digest_size=16).hexdigest()
 
 
-_as_len1_array = lambda x: _as_lenN_array(x, 1)
+as_len1_array = lambda x: as_lenN_array(x, 1)
 
 
-def _as_lenN_array(x, n):
+def as_lenN_array(x, n):
 
     if x is None or (isinstance(x, float) and not np.isfinite(x)):
         return pa.array([None] * n, type=pa.float64())

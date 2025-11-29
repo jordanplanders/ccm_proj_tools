@@ -9,14 +9,17 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 import pandas as pd
-
+import logging
+logger = logging.getLogger(__name__)
 
 try:
     from cedarkit.utils.routing.file_name_parsers import template_replace, parse_surr_label
-    from cedarkit.utils.tables.parquet_tools import drop_duplicates, _make_uid
+    from cedarkit.utils.tables.parquet_tools import drop_duplicates, make_uid
+    from cedarkit.utils.cli.logging import setup_logging, log_line
 except ImportError:
     from utils.routing.file_name_parsers import template_replace, parse_surr_label
-    from utils.tables.parquet_tools import drop_duplicates, _make_uid
+    from utils.tables.parquet_tools import drop_duplicates, make_uid
+    from utils.cli.logging import setup_logging, log_line
 
 
 def setup_conversion_from_calc_grp(output_dir, config, calc_grp_d):
@@ -266,7 +269,7 @@ def package_calc_grp_results_to_parquet(
 
         res = pd.concat(records, ignore_index=True)
 
-        res["uid"] = res.apply(_make_uid, axis=1)
+        res["uid"] = res.apply(make_uid, axis=1)
 
         # light typing
         for c in ("E","tau","Tp","lag","LibSize","surr_num","x_age_model_ind","y_age_model_ind"):
