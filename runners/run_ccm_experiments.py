@@ -11,7 +11,6 @@ try:
     from cedarkit.core.data_objects import CCMConfig
     from cedarkit.utils.routing.paths import set_calc_path, set_output_path, check_location
     from cedarkit.utils.io.gonogo import decide_file_handling
-
 except ImportError:
     # Fallback: imports when running as a package
     from core.project_config import load_config
