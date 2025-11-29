@@ -5,6 +5,7 @@ import numpy as np
 import gc
 from pathlib import Path
 
+
 pd.option_context('mode.use_inf_as_na', True)
 
 try:
@@ -16,6 +17,7 @@ try:
     from cedarkit.core.project_config import load_config
     from cedarkit.utils.cli.arg_parser import get_parser
     from cedarkit.utils.tables.parquet_tools import *
+    from cedarkit.utils.cli.logging import setup_logging, log_line
 
 except ImportError:
     # Fallback: imports when running as a package
@@ -27,7 +29,11 @@ except ImportError:
     from core.project_config import load_config
     from utils.cli.arg_parser import get_parser
     from utils.tables.parquet_tools import *
+    from utils.cli.logging import setup_logging, log_line
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config, existing_output=None, calc_delta_rho_table=True,
                    aggregate_libsize_table=True, calc_delta_rho_full=True):
@@ -55,10 +61,14 @@ def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config, exist
     print(f'Processing E={grp_info["E"]}, tau={grp_info["tau"]}', output_location / 'parquet', file=sys.stdout, flush=True)
 
     test_grp = DataGroup(grp_info, tmp_dir=tmp_dir)
+    print('\tgetting files', file=sys.stdout, flush=True)
+
     test_grp.get_files(config, output_location / 'parquet',
                        file_name_pattern='E{E}_tau{tau}_lag{lag}', source='parquet')
 
-    print(f'\tfound {len(test_grp.file_list)} files for E={grp_info["E"]}, tau={grp_info["tau"]}', file=sys.stdout, flush=True)
+    # print(f'\tfound {len(test_grp.file_list)} files for E={grp_info["E"]}, tau={grp_info["tau"]}', file=sys.stdout, flush=True)
+    log_line(logger, f'\tfound {len(test_grp.file_list)} files for E={grp_info["E"]}, tau={grp_info["tau"]}', indent=0,
+             log_type="debug")
     if len(test_grp.file_list) < 1:
         print("Skipping because no files found.")
         return
@@ -71,24 +81,31 @@ def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config, exist
         except:
             name = groupconfig_file.output_path
 
-        print(f'\t1 processing file {ij + 1}/{len(test_grp.file_list)}: {name}', file=sys.stdout, flush=True)
+        # print(f'\t1 processing file {ij + 1}/{len(test_grp.file_list)}: {name}', file=sys.stdout, flush=True)
+        log_line(logger, f'\t1 processing file {ij + 1}/{len(test_grp.file_list)}: {name}', indent=0,
+                 log_type="debug")
         output_col = groupconfig_file.pull_output(to_table=False)
 
         full_out = False
         stats_out = True
         if calc_delta_rho_full is True:
             full_out = True
+
         if calc_delta_rho_table is True:
             stats_out = True
         if (full_out is True) or (stats_out is True):
-            print(f'\tcalculating delta rho for {name}; full_out {full_out}, stats_out {stats_out}', file=sys.stdout, flush=True)
+            # print(f'\tcalculating delta rho for {name}; full_out {full_out}, stats_out {stats_out}', file=sys.stdout, flush=True)
+            log_line(logger, f'\tcalculating delta rho for {name}; full_out {full_out}, stats_out {stats_out}', indent=0,
+                     log_type="debug")
             output_col = output_col.calc_delta_rho(full_out=full_out, stats_out=stats_out)
 
         if aggregate_libsize_table is True:
             output_col = output_col.aggregate_libsize()
 
-        print(f'\tcalculated delta rho (full_out {full_out}, stats_out {stats_out}) and libsize aggregation ({aggregate_libsize_table}) {name}', file=sys.stdout, flush=True)
-
+        # print(f'\tcalculated delta rho (full_out {full_out}, stats_out {stats_out}) and libsize aggregation ({aggregate_libsize_table}) {name}', file=sys.stdout, flush=True)
+        log_line(logger, f'\tcalculated delta rho (full_out {full_out}, stats_out {stats_out}) and libsize aggregation ({aggregate_libsize_table}) {name}',
+                 indent=0,
+                 log_type="debug")
         output_collections.append(output_col)
 
     new_output_col = OutputCollection(in_table=output_collections, grp_specs=test_grp.get_group_config(), tmp_dir=tmp_dir)
@@ -127,18 +144,33 @@ def process_config(grp_info, E_i, tau_i, tmp_dir, output_location, config, exist
         df = gb.to_pandas()
 
         new_output_col.delta_rho_stats.write_table()
-        print('\twriting delta rho stats table', file=sys.stdout, flush=True)
+        # print('\twriting delta rho stats table', file=sys.stdout, flush=True)
+        log_line(logger, '\twriting delta rho stats table',
+                 indent=0,
+                 log_type="info")
 
         new_output_col.delta_rho_full.write_table()
-        print('\twriting delta rho full table', file=sys.stdout, flush=True)
+        # print('\twriting delta rho full table', file=sys.stdout, flush=True)
+        log_line(logger, '\twriting delta rho full table',
+                 indent=0,
+                 log_type="info")
 
         new_output_col.libsize_aggregated.write_table()
-        print('\twriting libsize aggregated table', file=sys.stdout, flush=True)
+        # print('\twriting libsize aggregated table', file=sys.stdout, flush=True)
+        log_line(logger, '\twriting libsize aggregated table',
+                 indent=0,
+                 log_type="info")
 
     except Exception as e:
-        print("Error pulling output for E={E}, tau={tau}: {error}".format(E=E, tau=tau, error=e))
+        # print("Error pulling output for E={E}, tau={tau}: {error}".format(E=E, tau=tau, error=e))
+        log_line(logger, "Error pulling output for E={E}, tau={tau}: {error}".format(E=E, tau=tau, error=e),
+                 indent=0,
+                 log_type="error")
 
-    print('\tclearing tables', file=sys.stdout, flush=True)
+    # print('\tclearing tables', file=sys.stdout, flush=True)
+    log_line(logger, '\tclearing tables',
+             indent=0,
+             log_type="info")
     new_output_col.clear_tables()
 
     cell_obj = GridCell(E_i, tau_i, new_output_col)
@@ -167,14 +199,22 @@ if __name__ == "__main__":
     7. Outputs progress and status messages to stdout.
     
     '''
+    setup_logging()
+
     parser = get_parser()
     args = parser.parse_args()
 
     if args.project is not None:
         proj_name = args.project
     else:
-        print('project name is required', file=sys.stdout, flush=True)
-        print('project name is required', file=sys.stderr, flush=True)
+        log_line(logger, 'project name is required',
+                 indent=0,
+                 log_type="info")
+        log_line(logger, 'project name is required',
+                 indent=0,
+                 log_type="error")
+        # print('project name is required', file=sys.stdout, flush=True)
+        # print('project name is required', file=sys.stderr, flush=True)
         sys.exit(0)
 
     # When run from the command line, assumes that the current working directory is the directory containing the proj_name (dyad) directory e.g. hol_temp_tsi_ccm
@@ -193,6 +233,7 @@ if __name__ == "__main__":
 
     calc_delta_rho_table = False
     aggregate_libsize_table = False
+    calc_delta_rho_table_full = False
     if args.flags is not None:
         if 'calc_delta_rho' in args.flags:
             calc_delta_rho_table = True
@@ -202,8 +243,10 @@ if __name__ == "__main__":
             calc_delta_rho_table_full = True
 
     calc_location = set_calc_path(None, proj_dir, config, '')
-    print(f'Calculation location: {calc_location}', file=sys.stdout, flush=True)
-    print(f'Read e_tau_grps_df from {group_file_name}.', file=sys.stdout, flush=True)
+    log_line(logger, f'Calculation location: {calc_location}', indent=0, log_type="info")
+    # print(f'Calculation location: {calc_location}', file=sys.stdout, flush=True)
+    # print(f'Read e_tau_grps_df from {group_file_name}.', file=sys.stdout, flush=True)
+    log_line(logger, f'Read e_tau_grps_df from {group_file_name}.', indent=0, log_type="info")
 
     e_tau_grps_df = pd.read_csv(calc_location / check_csv(group_file_name))
 
@@ -234,9 +277,13 @@ if __name__ == "__main__":
     # Process the (E, tau) configuration if not already processed
     not_in_grid = (E, tau) not in object_grid.keys()
     output_is_none = (not_in_grid is False) and ((object_grid[(E, tau)] is None) or (object_grid[(E, tau)].output is None))
-    print(f'E{E}-tau{tau}; not_in_grid: {not_in_grid}, output_is_none: {output_is_none}', file=sys.stdout, flush=True)
+
+    # print(f'E{E}-tau{tau}; not_in_grid: {not_in_grid}, output_is_none: {output_is_none}', file=sys.stdout, flush=True)
     if not_in_grid is True or output_is_none is True:
-        print('regardless of flags, going the dual calculations', file=sys.stdout, flush=True)
+        # print('regardless of flags, going the dual calculations', file=sys.stdout, flush=True)
+        log_line(logger, 'regardless of flags, going the dual calculations', indent=0,
+                 log_type="info")
+
         object_grid[(E, tau)] = process_config(row, E_is[E], tau_is[tau], tmp_dir, output_location, config, calc_delta_rho_table=True,
                                                aggregate_libsize_table=True, calc_delta_rho_full=True)
 
@@ -244,13 +291,17 @@ if __name__ == "__main__":
                                  protocol=5)
         del object_grid
         gc.collect()
-        print(f"Processed and saved E={E}, tau={tau} to {tmp_dir}.", file=sys.stdout, flush=True)
+        log_line(logger, f"Processed and saved E={E}, tau={tau} to {tmp_dir}.", indent=0,
+                 log_type="info")
+        # print(f"Processed and saved E={E}, tau={tau} to {tmp_dir}.", file=sys.stdout, flush=True)
     else:
         if object_grid[(E, tau)].output is None:
             calc_delta_rho_table = True
             aggregate_libsize_table = True
             calc_delta_rho_table_full = True
-            print('output is None, going the dual calculations', file=sys.stdout, flush=True)
+            log_line(logger, 'output is None, going the dual calculations', indent=0,
+                     log_type="info")
+            # print('output is None, going the dual calculations', file=sys.stdout, flush=True)
         else:
             if (object_grid[(E, tau)].output.delta_rho_stats is None) or (object_grid[(E, tau)].output.delta_rho_stats.path is None):
                 calc_delta_rho_table = True
@@ -260,8 +311,11 @@ if __name__ == "__main__":
             if (object_grid[(E, tau)].output.libsize_aggregated is None) or (object_grid[(E, tau)].output.libsize_aggregated.path is None):
                 aggregate_libsize_table = True
 
-        print('calculations have been explicitly set: calc_delta_rho_table', calc_delta_rho_table,
-              '; aggregate_libsize:', aggregate_libsize_table, file=sys.stdout, flush=True)
+        log_line(logger, ['calculations have been explicitly set: calc_delta_rho_table', calc_delta_rho_table,
+              '; aggregate_libsize:', aggregate_libsize_table], indent=0,
+                 log_type="info")
+        # print('calculations have been explicitly set: calc_delta_rho_table', calc_delta_rho_table,
+        #       '; aggregate_libsize:', aggregate_libsize_table, file=sys.stdout, flush=True)
         if (calc_delta_rho_table is True) or (aggregate_libsize_table is True) or (calc_delta_rho_table_full is True):
 
             object_grid[(E, tau)] = process_config(row, E_is[E], tau_is[tau], tmp_dir, output_location, config, existing_output=object_grid[(E, tau)].output,
@@ -273,9 +327,13 @@ if __name__ == "__main__":
                                    protocol=5)
             del object_grid
             gc.collect()
-            print(f"Processed and saved E={E}, tau={tau} to {tmp_dir}.", file=sys.stdout, flush=True)
+            log_line(logger, f"Processed and saved E={E}, tau={tau} to {tmp_dir}.", indent=0,
+                     log_type="info")
+            # print(f"Processed and saved E={E}, tau={tau} to {tmp_dir}.", file=sys.stdout, flush=True)
         else:
-            print(f"Skipping E={E}, tau={tau} because already processed.", file=sys.stdout, flush=True)
+            log_line(logger, f"Skipping E={E}, tau={tau} because already processed.", indent=0,
+                     log_type="info")
+            # print(f"Skipping E={E}, tau={tau} because already processed.", file=sys.stdout, flush=True)
 
     # Process if either calculation flag is set
     # elif (calc_delta_rho_table is True) or (aggregate_libsize_table is True):

@@ -1,8 +1,15 @@
 
-
+import logging
+logger = logging.getLogger(__name__)
+try:
+    from cedarkit.utils.cli.logging import log_line
+except ImportError:
+    from utils.cli.logging import log_line
 
 class RelationshipSide:
     def __init__(self, r, relationship=None, var_x='temp', var_y='TSI', influence_word='causes'):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+
         self.var_x = var_x if relationship is None else relationship.var_x
         self.var_y = var_y if relationship is None else relationship.var_y
         self.influence_word = influence_word
@@ -44,6 +51,7 @@ class RelationshipSide:
 class Relationship:
 
     def __init__(self, var_x='temp', var_y='TSI', surr_flag='neither'):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.influence_word = 'causes'
         self.var_x = var_x

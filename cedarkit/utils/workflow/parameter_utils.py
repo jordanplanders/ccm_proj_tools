@@ -11,11 +11,15 @@ import pyarrow.compute as pc
 
 import numpy as np
 import pandas as pd
+import logging
+logger = logging.getLogger(__name__)
 
 try:
     from cedarkit.utils.routing.paths import set_grp_path, template_replace
+    from cedarkit.utils.cli.logging import setup_logging, log_line
 except ImportError:
     from utils.routing.paths import set_grp_path, template_replace
+    from utils.cli.logging import setup_logging, log_line
 
 
 def remove_already_completed(pset, output_location, performance_consideration=False, existence_consideration=False,

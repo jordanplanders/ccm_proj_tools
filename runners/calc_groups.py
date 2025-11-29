@@ -16,11 +16,13 @@ try:
     # adjust the module path below to where these helpers actually live in your project
     from cedarkit.utils.routing.paths import check_location, set_calc_path, set_output_path
     from cedarkit.utils.cli.arg_parser import get_parser
+    from cedarkit.utils.cli.logging import setup_logging, log_line
 except ImportError:
     # Fallback: imports when running as a package
     from utils.cli.arg_parser import get_parser
     from core.project_config import load_config
     from utils.paths import check_location, set_calc_path, set_output_path
+    from utils.cli.logging import setup_logging, log_line
 
 '''
 Main script to assign group IDs based on unique parameter combinations.

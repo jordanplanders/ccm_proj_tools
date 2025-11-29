@@ -2,7 +2,13 @@ import copy
 import os
 import sys
 from pathlib import Path
+import logging
+logger = logging.getLogger(__name__)
 
+try:
+    from cedarkit.utils.cli.logging import log_line
+except ImportError:
+    from utils.cli.logging import log_line
 
 def check_location(target_path=None, hpc_word='lplander'):
     if target_path is None:

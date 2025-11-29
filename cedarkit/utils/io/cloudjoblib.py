@@ -3,7 +3,14 @@ import pickle
 import tempfile
 import cloudpickle
 import joblib
+import logging
+logger = logging.getLogger(__name__)
 
+try:
+    from cedarkit.utils.cli.logging import setup_logging, log_line
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils.cli.logging import setup_logging, log_line
 
 def _atomic_write(path, writer):
     d = os.path.dirname(path) or "."
