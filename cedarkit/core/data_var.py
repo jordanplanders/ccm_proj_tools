@@ -2,22 +2,26 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import pyleoclim as pyleo
-
-import cedarkit.utils.routing.paths
+import logging
+logger = logging.getLogger(__name__)
+# import cedarkit.utils.routing.paths
 
 # from utils.data_access import choose_data_source, check_csv, remove_extra_index
 
 try:
     from cedarkit.utils.routing.file_name_parsers import check_csv
     from cedarkit.utils.io.timeseries_utils import choose_data_source, remove_extra_index
+    from cedarkit.utils.cli.logging import setup_logging, log_line
 except ImportError:
     # Fallback: imports when running as a package
     from utils.routing.file_name_parsers import check_csv
     from utils.io.timeseries_utils import choose_data_source, remove_extra_index
+    from utils.cli.logging import setup_logging, log_line
 
 
 class DataVarConfig:
     def __init__(self, config, var_id, proj_dir, suffix_label=None, suffix_ind=None):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.var_id = var_id
         self.var = None  # e.g. 'temp'
@@ -121,7 +125,7 @@ class DataVarConfig:
             self.surr_csv_stem = surr_ts_d.pop('csv_stem', None)
         elif 'surr_file_name' in var_info.keys():
             surr_file_name = var_info.pop('surr_file_name', None)
-            self.surr_csv_stem = cedarkit.utils.routing.paths.replace('.txt', '')
+            self.surr_csv_stem = surr_file_name.replace('.txt', '')
         else:
             print(f'No surr_csv_stem found for {self.var_id}')
 
@@ -193,10 +197,13 @@ class VarObject(DataVarConfig):
         if data_var_config is not None and isinstance(data_var_config, DataVarConfig):
             # Copy all attributes from the provided DataVarConfig
             for key, value in data_var_config.__dict__.items():
-                setattr(self, key, value)
+                if key !='log':
+                    setattr(self, key, value)
         else:
             # Initialize as a new DataVarConfig
             super().__init__(config, var_id, proj_dir)
+
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.ts = None
         self.ts_type = None  # 'real' or 'surr'
