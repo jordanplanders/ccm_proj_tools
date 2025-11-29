@@ -3,11 +3,16 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 from matplotlib.markers import MarkerStyle
+import logging
 
+logger = logging.getLogger(__name__)
 try:
-    from cedarkit.utils.plotting.plotting_utils import check_palette_syntax, add_relation_s_inferred
+    from cedarkit.utils.plotting.plotting_utils import check_palette_syntax, add_relation_s_inferred, replace_latex_labels, isotope_ylabel
+    from cedarkit.utils.cli.logging import log_line
 except ImportError:
-    from viz.plotting_utils import check_palette_syntax, add_relation_s_inferred
+    from utils.plotting.plotting_utils import check_palette_syntax, add_relation_s_inferred, replace_latex_labels, isotope_ylabel
+    from utils.cli.logging import log_line
+
 
 class BasePlot:
     """Class to create lag plots with optional scatter and highlighted points.
@@ -56,9 +61,14 @@ class BasePlot:
 
 
     def __init__(self, grp_d):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+
         self.y_var = None #y_var
         self.x_var = None # x_var
         self.palette = None #palette
+        self.ylabel = None
+        self.xlabel = None
+        self.title = None
         # self.top_val_color = 'black'
         # self.bottom_val_color = 'gray'
         # self.highlight_points_size = 40
@@ -131,7 +141,19 @@ class BasePlot:
 
         available_ylabel = self.ax.get_ylabel()
         available_ylabel = available_ylabel.replace('_', ' ')
-        self.ax.set_ylabel(available_ylabel)
+        self.ylabel = replace_latex_labels(available_ylabel)
+        self.ax.set_ylabel(self.ylabel)
+
+        xlabel_available = self.ax.get_xlabel()
+        xlabel_available = xlabel_available.replace('_', ' ')
+        self.xlabel = replace_latex_labels(xlabel_available)
+        self.ax.set_xlabel(self.xlabel)
+
+        title_available = self.ax.get_title()
+        title_available = title_available.replace('_', ' ')
+        self.title = replace_latex_labels(title_available)
+        self.ax.set_title(self.title)
+
         # Remove duplicate legend entries if scatter used
         self.ax.grid(False)
         self.ax.tick_params(axis='y', length=5, width=1)
@@ -203,6 +225,7 @@ class LibSizeRhoPlot(BasePlot):
                 'palette': palette
             }
             super().__init__(base_grp)
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.lag = lag
         self.units=units
@@ -335,6 +358,7 @@ class LagPlot(BasePlot):
             }
             super().__init__(base_grp)
 
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.top_val_color = 'black'
         self.bottom_val_color = 'gray'
@@ -347,7 +371,7 @@ class LagPlot(BasePlot):
 
     def add_boxplot(self, df, hue='relation', relation_direction='TSI', legend=False, collect_legend=True, xlims=[-20, 20]):
 
-        kwargs = {'widths': [40/(xlims[1]-xlims[0])]*len(df.lag.unique()), 'positions':df.lag.unique()}
+        kwargs = {}#{'widths': [40/(xlims[1]-xlims[0])]*len(df.lag.unique()), 'positions':df.lag.unique()}
         self.ax = sns.boxplot(data=df[df['relation'].str.startswith(relation_direction)], x=self.x_var, y=self.y_var,
                     hue=hue, native_scale=True, linewidth=.51, ax=self.ax, dodge=True,gap=.1,
                     legend=True, palette=self.palette, whis=(5, 95), fliersize=0, **kwargs)
@@ -405,6 +429,7 @@ class LagPlot(BasePlot):
     def make_classic_lag_plot(self, outputgrp, stats_only=True, scatter=True, boxplot=False, surr_lines=False):
         if outputgrp.delta_rho_stats is None:
             outputgrp.calc_delta_rho(stats_out=True)
+        outputgrp.delta_rho_stats.get_table()
         self.palette = check_palette_syntax(self.palette, outputgrp.delta_rho_stats.full)
 
         if stats_only is False and outputgrp.delta_rho_full is None:
@@ -432,7 +457,10 @@ class LagPlot(BasePlot):
                 if stats_only is False and outputgrp.delta_rho_full is not None and len(outputgrp.delta_rho_full.surrogate) > 0:
                     box_df = self.pull_df(outputgrp.delta_rho_full.surrogate, columns = [self.x_var, self.y_var, 'relation', 'surr_var', 'surr_num'])
                 else:
+                    log_line(logger, 'boxplot with stats', indent=0,
+                             log_type="debug")
                     box_df = self.pull_df(outputgrp.delta_rho_stats.surrogate, columns = [self.x_var, self.y_var, 'relation', 'surr_var', 'surr_num'])
+                    log_line(logger, f'box_df size before lag filtering: {len(box_df)}', indent=0, log_type="debug")
 
                 box_df['lag'] = box_df['lag'].astype(int)
                 if len(box_df)>0:
@@ -442,7 +470,9 @@ class LagPlot(BasePlot):
                         subset_lags = [lag for ik, lag in enumerate(lags) if ik % 4 == 0]
                         box_df = box_df[box_df['lag'].isin(subset_lags)]
                     self.add_boxplot(box_df)
-
+                    log_line(logger, f'box_df lags used: {box_df["relation"].unique()}', indent=0, log_type="debug")
+                    log_line(logger, [f'box_df size after lag filtering: {len(box_df)}', box_df.head()], indent=0, log_type="debug")
+            # print('made scatter plot' ,type(self.ax))
         except Exception as e:
             print('no surrogate full data for scatter', e)
 
@@ -467,6 +497,7 @@ class ResultsGrid(BasePlot):
             }
             super().__init__(base_grp)
 
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.relationships = relationship
         self.marker_key = {'left':self.relationships.var_x, 'right':self.relationships.var_y}
@@ -484,9 +515,9 @@ class ResultsGrid(BasePlot):
         # self.pal = None
         self.cbar = False
         self.dyad_df = None
-        self.ylabel = None
-        self.xlabel = None
-        self.title = None
+        # self.ylabel = None
+        # self.xlabel = None
+        # self.title = None
         self.grid_type='heatmap'
 
     def populate_from_cellobj(self, cellobj):
@@ -604,6 +635,7 @@ class SimplexGrid(BasePlot):
             }
             super().__init__(base_grp)
 
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.hue_var = hue_var
         self.vmin = None
@@ -611,9 +643,9 @@ class SimplexGrid(BasePlot):
         # self.pal = None
         self.cbar = False
         self.dyad_df = None
-        self.ylabel = None
-        self.xlabel = None
-        self.title = None
+        # self.ylabel = None
+        # self.xlabel = None
+        # self.title = None
         self.cbar_ax = None
         self.cbar_label = r'$\rho$'
 

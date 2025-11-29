@@ -1,16 +1,23 @@
 import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
+import logging
+logger = logging.getLogger(__name__)
 
 try:
-    from cedarkit.utils.plotting.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel
+    from cedarkit.utils.plotting.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel, replace_latex_labels
+    from cedarkit.utils.cli.logging import log_line
+
 except ImportError:
     # Fallback: imports when running as a package
-    from viz.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel
+    from utils.plotting.plotting_utils import font_resizer, int_yticks_within_ylim, replace_supylabel, isotope_ylabel, replace_latex_labels
+    from utils.cli.logging import log_line
 
 
 class GridCell:
     def __init__(self, row, col, output=None):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+
         self.row = row
         self.col = col
         self.occupied = False
@@ -27,6 +34,8 @@ class GridCell:
 
 class GridPlot:
     def __init__(self, nrows, ncols, width_ratios=None, height_ratios=None, grid_type='plot'):
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+
         self.nrows = nrows
         self.ncols = ncols
         self.title = None
@@ -158,7 +167,7 @@ class GridPlot:
                 ax.axhline(add_hline, color='gray', linestyle='--', linewidth=1)
 
     def tidy_rows(self, add_hline=None, ylim_by='central', supylabels=None, keep_ylabels=False,
-                  supylabel_offset=0.04, keep_titles=False, title_pad=10, rlabel_pad=10, llabel_pad=10, title_rows=[0]):
+                  supylabel_offset=0.04, keep_titles=False, title_pad=10, rlabel_pad=10, llabel_pad=10, title_rows=[0], titley=1):
 
         maxcols = max([col_check_key[1] for col_check_key in self.ax_grid_types.keys()])
 
@@ -207,13 +216,13 @@ class GridPlot:
         for ik, subfig in enumerate(self.subfigs):
             ylabel = isotope_ylabel(subfig.axes[0].get_ylabel())
             if ylabel in ['', ' ', None]:
-                ylabel = self.default_ylabel
+                ylabel = replace_latex_labels(self.default_ylabel)
 
             supylabel = ''
             if ylabel is not None:
                 ylabel_parts = ylabel.rsplit('\n', 1)
                 if len(ylabel_parts) > 1:
-                    supylabel = replace_supylabel(ylabel_parts[0])
+                    supylabel = replace_latex_labels(replace_supylabel(ylabel_parts[0]))
                     ylabel = '\n'.join(ylabel_parts[1:])
                     if supylabels is not False:
                         if len(supylabel) > 0:
@@ -262,7 +271,7 @@ class GridPlot:
 
                 elif self.ax_grid_types[key] == 'cbar':
                     cbar_ylabel = ax.get_ylabel()
-                    ax.set_ylabel(cbar_ylabel, rotation=0, labelpad=10, va='center', fontsize='medium')
+                    ax.set_ylabel(replace_latex_labels(cbar_ylabel), rotation=0, labelpad=10, va='center', fontsize='medium')
 
                 elif self.ax_grid_types[key] in ['legend', 'annotation']:
                     ax.set_facecolor('none')
@@ -290,7 +299,7 @@ class GridPlot:
                     ax.set_xticklabels([])
                     ax.set_xticks([])
 
-                    ax.set_title(ax.get_title(), fontsize='large', fontweight='bold', pad=title_pad)
+                    ax.set_title(replace_latex_labels(ax.get_title()), fontsize='large', fontweight='bold', pad=title_pad)
 
                 else:
                     if self.ax_grid_types[key] == 'heatmap':
@@ -420,11 +429,12 @@ class GridPlot:
                                 xticks = ax.get_xticks()
                                 ax.spines['bottom'].set_bounds(xticks[0], xticks[-1])
 
+                    title_text = replace_latex_labels(ax.get_title())
                     if keep_titles == 'individual':
-                        ax.set_title(ax.get_title(), fontsize='large', fontweight='bold', pad=title_pad)
+                        ax.set_title(title_text, fontsize='large', fontweight='bold', pad=title_pad)
                     else:
                         if ik in title_rows:
-                            ax.set_title(ax.get_title(), fontsize='large', fontweight='bold', pad=title_pad)
+                            ax.set_title(title_text, fontsize='large', fontweight='bold', pad=title_pad)
                         elif (ik > 0) and (supylabels is True):
                             ax.set_title('')
         # for ik, subfig in enumerate(self.subfigs):
@@ -506,12 +516,14 @@ class GridPlot:
             #     subfig.axes[0].set_yticks(yticks[:-1])
             #     subfig.axes[-1].set_yticks(yticks[:-1])
 
-
+        if self.title is not None:
+            self.fig.suptitle(replace_latex_labels(self.title), fontsize='x-large', fontweight='bold', y=titley)
         plt.tight_layout()
 
     def add_legend(self, bbox_to_anchor=(1.05, 1), loc='upper left'):
         handles = self.line_handles + self.scatter_handles
         labels = self.line_labels + self.scatter_labels
+        labels = [replace_latex_labels(label) for label in labels]
         ax_legend = self.subfigs[0].axes[-1] if self.nrows > 1 else self.subfigs[0].axes[0]
         if handles:
             ax_legend.legend(handles, labels, bbox_to_anchor=bbox_to_anchor, loc=loc)
@@ -649,6 +661,7 @@ class GridPlot:
 class SummaryGrid(GridPlot):
     def __init__(self, nrows, ncols, width_ratios=None, height_ratios=None, grid_type='heatmap'):
         super().__init__(nrows, ncols, width_ratios=width_ratios, height_ratios=height_ratios, grid_type=grid_type)
+        self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
         self.vlims = []
         self.cbar_ax = None

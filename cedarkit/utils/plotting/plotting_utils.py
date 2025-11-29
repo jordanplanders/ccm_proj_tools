@@ -6,8 +6,15 @@ import numpy as np
 import seaborn as sns
 import pyarrow as pa
 import pyarrow.compute as pc
+import logging
+logger = logging.getLogger(__name__)
 
-import cedarkit.utils
+try:
+    from cedarkit.utils.cli.logging import setup_logging, log_line
+except ImportError:
+    # Fallback: imports when running as a package
+    from utils.cli.logging import setup_logging, log_line
+# import cedarkit.utils
 
 
 def font_resizer(context='paper', multiplier=1.0):
@@ -225,3 +232,23 @@ def isotope_ylabel(isotope):
         if key in isotope:
             isotope = isotope.replace(key, isotope_labels[key])
     return isotope
+
+def replace_latex_labels(label):
+    if '$\delta' not in label:
+        label = label.replace('delta', r'$\delta$')
+    # label = label.replace('excess', r'$d$-excess')
+    # label = label.replace('D', r'$D$')
+    # label = label.replace('O', r'$O$')
+    label = label.replace('Wm2',r'W/m$^{2}$')
+    label = label.replace('d18O',r'$\delta^{18}O$')
+    if '$^18' not in label:
+        label = label.replace('^18', r'$^{18}$')
+    if '$^2' not in label:
+        label = label.replace('^2', r'$^{2}$')
+    if '$\Delta' not in label:
+        label = label.replace('Delta', r'$\Delta$')
+    if '$\tau' not in label:
+        label = label.replace('tau', r'$\tau$')
+    if '$\rho' not in label:
+        label = label.replace('rho', r'$\rho$')
+    return label
