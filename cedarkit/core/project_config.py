@@ -3,6 +3,7 @@ from pathlib import Path
 
 try:
     import cedarkit.utils.routing.paths
+
 except ImportError:
     # Fallback: imports when running as a package
     import utils.paths
