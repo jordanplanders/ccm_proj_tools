@@ -1,29 +1,21 @@
-import datetime
 import os
 import sys
 import time
 
 import pandas as pd
 import pyEDM as pe
+# from cedarkit.utils.cli.logging import print_log_line
+import logging
+logger = logging.getLogger(__name__)
+
 try:
     from cedarkit.utils.workflow import process_output as po
+    from cedarkit.utils.cli.logging import setup_logging, log_line
 except ImportError:
     # Fallback: imports when running as a package
     from utils.workflow import process_output as po
+    from utils.cli.logging import log_line
 
-
-def print_log_line(script, function, log_line, log_type='info'):
-    if log_type == 'error':
-        file_pointer = sys.stderr
-    else:
-        file_pointer = sys.stdout
-
-    if isinstance(log_line, list):
-        log_line = ', '.join(log_line)
-
-    timestamp = datetime.datetime.now()
-    print(timestamp.strftime('%Y-%m-%d %H:%M:%S'), log_line, f'{script}: {function}', file=file_pointer, flush=True)
-    return time.time()
 
 
 def run_experiment(arg_tuple):
@@ -47,13 +39,20 @@ def run_experiment(arg_tuple):
     run_id = int(time.time() * 1000) + start_ind
 
     df_path = ccm_obj.file_path#output_dir / df_csv_name
-    start_time = print_log_line(script, 'run_experiment',
-                                     [f'{df_path} exists: {df_path.exists()}, starting start_ind {start_ind}',
+    log_line(logger, [f'{df_path} exists: {df_path.exists()}, starting start_ind {start_ind}',
                                      f'pset_id {ccm_obj.pset_id}, col_var_id {ccm_obj.col_var_id}',
                                      f'target_var_id {ccm_obj.target_var_id}, E {ccm_obj.E}, tau {ccm_obj.tau}',
                                      f'lag {ccm_obj.lag}, knn {ccm_obj.knn}, Tp {ccm_obj.Tp}, sample {ccm_obj.sample}',
                                      f'weighted {ccm_obj.weighted}, train_ind_i {ccm_obj.train_ind_i}',
-                                     f'surr_var {ccm_obj.surr_var}, surr_num {ccm_obj.surr_num}'], 'info')
+                                     f'surr_var {ccm_obj.surr_var}, surr_num {ccm_obj.surr_num}'], indent=0, log_type="info")
+    start_time = time.time()
+    # start_time = print_log_line(script, 'run_experiment',
+    #                             [f'{df_path} exists: {df_path.exists()}, starting start_ind {start_ind}',
+    #                                  f'pset_id {ccm_obj.pset_id}, col_var_id {ccm_obj.col_var_id}',
+    #                                  f'target_var_id {ccm_obj.target_var_id}, E {ccm_obj.E}, tau {ccm_obj.tau}',
+    #                                  f'lag {ccm_obj.lag}, knn {ccm_obj.knn}, Tp {ccm_obj.Tp}, sample {ccm_obj.sample}',
+    #                                  f'weighted {ccm_obj.weighted}, train_ind_i {ccm_obj.train_ind_i}',
+    #                                  f'surr_var {ccm_obj.surr_var}, surr_num {ccm_obj.surr_num}'], 'info')
 
     try:
         pred_num = ccm_obj.pred_num
@@ -86,10 +85,13 @@ def run_experiment(arg_tuple):
     ccm_out_df['run_id'] = run_id
     ccm_out_df['pset_id'] = ccm_obj.pset_id
 
-    print_log_line(script, 'run_experiment', [f'!\tfinish, start index: {start_ind}, {ccm_obj.pset_id}',
+    log_line(logger,[f'!\tfinish, start index: {start_ind}, {ccm_obj.pset_id}',
                                               f'time elapsed: {time.time() - start_time}',
-                                              f'{ccm_obj.col_var_id}- {ccm_obj.target_var_id}; E={ccm_obj.E}, tau={ccm_obj.tau}, lag={ccm_obj.lag}'],
-          'info')
+                                              f'{ccm_obj.col_var_id}- {ccm_obj.target_var_id}; E={ccm_obj.E}, tau={ccm_obj.tau}, lag={ccm_obj.lag}'], indent=0, log_type="info")
+          #    print_log_line(script, 'run_experiment', [f'!\tfinish, start index: {start_ind}, {ccm_obj.pset_id}',
+          #                                     f'time elapsed: {time.time() - start_time}',
+          #                                     f'{ccm_obj.col_var_id}- {ccm_obj.target_var_id}; E={ccm_obj.E}, tau={ccm_obj.tau}, lag={ccm_obj.lag}'],
+          # 'info')
 
     # return [logs]
     return ccm_out_df, df_path
